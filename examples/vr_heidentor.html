@@ -63,7 +63,7 @@
 			//viewer.toggleSidebar();
 		});
 		
-		Potree.loadPointCloud("https://potree.org/pointclouds/heidentor/metadata.json", "Heidentor", function(e){
+		Potree.loadPointCloud("../pointclouds/heidentor/metadata.json", "Heidentor", function(e){
 			viewer.scene.addPointCloud(e.pointcloud);
 			e.pointcloud.position.z = 0;
 			let material = e.pointcloud.material;
