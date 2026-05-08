@@ -647,7 +647,7 @@
 	<!-- ─────────── CUSTOM SIDEBAR (ported from tur.html) ─────────── -->
 	<div id="sidebar">
 		<div class="sidebar-header">
-			<div class="label">POTREE TOUR</div>
+			<div class="label"></div>
 			<h1>3D<br>Viewer</h1>
 		</div>
 
@@ -887,17 +887,29 @@
 	overlayRenderer.toneMappingExposure = 1.2;
 	wrap.appendChild(overlayRenderer.domElement);
 
+	// Up-axis correction: Potree's point cloud world is Z-up, but our GLB / chroma plane
+	// content is authored Y-up. Everything overlay-related goes inside `overlayRoot`,
+	// whose +90° X rotation maps the inner Y-up local frame onto the outer Z-up world.
+	const overlayRoot = new THREE.Group();
+	overlayRoot.rotation.x = Math.PI / 2;
+	overlayScene.add(overlayRoot);
+
+	/** Convert a Z-up world position into overlayRoot's Y-up local frame. */
+	function worldToOverlayLocal(worldPos) {
+		return new THREE.Vector3(worldPos.x, worldPos.z, -worldPos.y);
+	}
+
 	// Lighting (only affects overlay GLB models, not the point cloud)
-	overlayScene.add(new THREE.AmbientLight(0xffffff, 0.6));
+	overlayRoot.add(new THREE.AmbientLight(0xffffff, 0.6));
 	const key = new THREE.DirectionalLight(0xffffff, 2.5);
 	key.position.set(5, 8, 5);
-	overlayScene.add(key);
+	overlayRoot.add(key);
 	const fill = new THREE.DirectionalLight(0x88aaff, 0.8);
 	fill.position.set(-5, 2, -3);
-	overlayScene.add(fill);
+	overlayRoot.add(fill);
 	const rim = new THREE.DirectionalLight(0x00c8ff, 0.4);
 	rim.position.set(0, -3, -5);
-	overlayScene.add(rim);
+	overlayRoot.add(rim);
 
 	// ── DOM REFS ───────────────────────────────────────────────
 	const loaderOverlay  = document.getElementById('loader-overlay');
@@ -1348,7 +1360,7 @@ uniform float smoothing;`
 
 			personGroup = new THREE.Group();
 			personGroup.add(personMesh);
-			overlayScene.add(personGroup);
+			overlayRoot.add(personGroup);
 
 			currentModel = personGroup;
 			currentType  = 'person';
@@ -1365,10 +1377,10 @@ uniform float smoothing;`
 					const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
 					const sc  = targetSize / Math.max(sz.x, sz.y, sz.z);
 					placeRootOnFloor(m, sc);
-					m.position.add(walkOriginOffset);
+					m.position.add(worldToOverlayLocal(walkOriginOffset));
 					m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 					m.userData.isCompanionModel = true;
-					overlayScene.add(m);
+					overlayRoot.add(m);
 				}, undefined, (err) => console.warn('Companion model failed:', err));
 			}
 
@@ -1395,7 +1407,7 @@ uniform float smoothing;`
 		if (!personGroup) return;
 		const tmp = new THREE.Vector3();
 		walkPath.getPointAt(walkProgress, tmp);
-		tmp.multiplyScalar(walkPathScale).add(walkOriginOffset);
+		tmp.multiplyScalar(walkPathScale).add(worldToOverlayLocal(walkOriginOffset));
 		personGroup.position.copy(tmp);
 	}
 
@@ -1420,13 +1432,13 @@ uniform float smoothing;`
 			const normScale  = targetSize / Math.max(size.x, size.y, size.z);
 
 			placeRootOnFloor(model, normScale);
-			model.position.add(walkOriginOffset);
+			model.position.add(worldToOverlayLocal(walkOriginOffset));
 
 			model.traverse(o => {
 				if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
 			});
 
-			overlayScene.add(model);
+			overlayRoot.add(model);
 			currentModel = model;
 			currentType  = 'model';
 
@@ -1442,49 +1454,81 @@ uniform float smoothing;`
 		});
 	}
 
-	// ── CLEAR SCENE ────────────────────────────────────────────
+	// ── CLEAR SCENE / RESOURCE DISPOSAL ────────────────────────
+	// Every PBR / shader / video texture slot we want to release on model swap.
+	const TEXTURE_SLOT_KEYS = [
+		'map', 'alphaMap', 'aoMap', 'bumpMap', 'displacementMap',
+		'emissiveMap', 'envMap', 'lightMap', 'metalnessMap',
+		'normalMap', 'roughnessMap', 'specularMap',
+		'clearcoatMap', 'clearcoatNormalMap', 'clearcoatRoughnessMap',
+		'transmissionMap', 'thicknessMap',
+		'sheenColorMap', 'sheenRoughnessMap', 'iridescenceMap'
+	];
+
+	function disposeMaterial(m) {
+		if (!m) return;
+		for (const key of TEXTURE_SLOT_KEYS) {
+			const t = m[key];
+			if (t && typeof t.dispose === 'function') {
+				try { t.dispose(); } catch (_) {}
+			}
+			if (key in m) m[key] = null;
+		}
+		if (m.uniforms) {
+			for (const k of Object.keys(m.uniforms)) {
+				const u = m.uniforms[k];
+				if (u && u.value && typeof u.value.dispose === 'function') {
+					try { u.value.dispose(); } catch (_) {}
+					u.value = null;
+				}
+			}
+		}
+		try { m.dispose(); } catch (_) {}
+	}
+
+	function disposeObject3D(obj) {
+		obj.traverse(c => {
+			if (c.geometry && typeof c.geometry.dispose === 'function') {
+				try { c.geometry.dispose(); } catch (_) {}
+			}
+			if (c.material) {
+				[].concat(c.material).forEach(disposeMaterial);
+			}
+		});
+	}
+
 	function clearScene() {
-		const companions = [];
-		overlayScene.traverse(obj => { if (obj.userData.isCompanionModel) companions.push(obj); });
-		companions.forEach(obj => {
-			overlayScene.remove(obj);
-			obj.traverse(c => {
-				if (c.geometry) c.geometry.dispose();
-				if (c.material) [].concat(c.material).forEach(m => m.dispose());
-			});
+		// Remove + dispose any companion GLBs that got attached alongside a person
+		const removeList = [];
+		overlayRoot.traverse(obj => { if (obj.userData.isCompanionModel) removeList.push(obj); });
+		removeList.forEach(obj => {
+			overlayRoot.remove(obj);
+			disposeObject3D(obj);
 		});
 
+		// Remove + dispose the active model / person group
 		if (currentModel) {
-			overlayScene.remove(currentModel);
-			currentModel.traverse(obj => {
-				if (obj.geometry) obj.geometry.dispose();
-				if (obj.material) {
-					[].concat(obj.material).forEach(m => {
-						if (m.uniforms?.tex?.value) {
-							const tex = m.uniforms.tex.value;
-							m.uniforms.tex.value = null;
-							if (tex && typeof tex.dispose === 'function') tex.dispose();
-						}
-						if (m.map) {
-							const tm = m.map;
-							m.map = null;
-							if (tm && typeof tm.dispose === 'function') tm.dispose();
-						}
-						m.dispose();
-					});
-				}
-			});
+			overlayRoot.remove(currentModel);
+			disposeObject3D(currentModel);
 			currentModel = null;
 		}
+
+		// Tear down chroma-key video pipeline
 		videoTex = null;
 		if (videoEl) {
-			videoEl.pause();
-			try { videoEl.removeAttribute('src'); videoEl.load(); } catch (_) {}
+			try {
+				videoEl.pause();
+				videoEl.removeAttribute('src');
+				videoEl.load();
+			} catch (_) {}
 			videoEl = null;
 		}
 		personGroup = null;
 		personMesh  = null;
 		currentType = null;
+
+		// Drop renderer-side caches so freed textures actually leave the GPU
+		try { overlayRenderer.renderLists.dispose(); } catch (_) {}
 
 		stopAudio();
 	}
@@ -1641,9 +1685,9 @@ uniform float smoothing;`
 
 			placePersonOnPath();
 
-			// Billboard — face camera, stay upright on Y
-			const dir = new THREE.Vector3()
-				.subVectors(overlayCamera.position, personGroup.position);
+			// Billboard — face camera, stay upright on local Y (== world Z)
+			const camLocal = worldToOverlayLocal(overlayCamera.position);
+			const dir = new THREE.Vector3().subVectors(camLocal, personGroup.position);
 			dir.y = 0;
 			if (dir.lengthSq() > 0.0001) {
 				personGroup.rotation.y = Math.atan2(dir.x, dir.z);
@@ -1664,13 +1708,16 @@ uniform float smoothing;`
 	}
 	window.addEventListener('resize', resizeOverlay);
 
-	// Click-to-log path helper (works because canvas-wrap has pointer-events:none,
-	// the click hits Potree which still bubbles up to window)
+	// Click-to-log path helper — emits a coord in the same Y-up local frame the walkPath uses,
+	// expressed relative to the current walk anchor (so coords paste straight into walkPath).
 	window.addEventListener('click', () => {
 		if (currentType === 'person') {
-			const p = overlayCamera.position;
+			const camLocal = worldToOverlayLocal(overlayCamera.position);
+			const origin   = worldToOverlayLocal(walkOriginOffset);
+			const rel = camLocal.clone().sub(origin);
+			if (walkPathScale > 0) rel.divideScalar(walkPathScale);
 			console.log(
-				`%c[PATH POINT]  new THREE.Vector3(${p.x.toFixed(2)}, 0, ${p.z.toFixed(2)}),`,
+				`%c[PATH POINT]  new THREE.Vector3(${rel.x.toFixed(2)}, 0, ${rel.z.toFixed(2)}),`,
 				'color:#a855f7;font-weight:bold'
 			);
 		}
