@@ -1,0 +1,1039 @@
+<!doctype html>
+<html lang="ro">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Harta Interactiva Turistica Romania</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --panel-width: 355px;
+        --bg: #0a0c0f;
+        --panel: #0f1318;
+        --border: #1e2530;
+        --accent: #00c8ff;
+        --accent2: #ff6b35;
+        --text: #c8d4e0;
+        --text-dim: #5d697a;
+        --glass: rgba(15, 19, 24, 0.84);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Rajdhani", "Segoe UI", Arial, sans-serif;
+        background: radial-gradient(circle at top, #121821 0%, #0c1118 55%, #080b10 100%);
+        color: var(--text);
+      }
+      #app {
+        width: min(1400px, 96vw);
+        height: min(820px, 94vh);
+        margin: 2vh auto;
+        border-radius: 28px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        box-shadow: 0 28px 64px rgba(0, 0, 0, 0.58);
+        position: relative;
+      }
+      #map {
+        width: 100%;
+        height: 100%;
+      }
+      .title-bar {
+        position: absolute;
+        top: 14px;
+        left: calc(var(--panel-width) + 22px);
+        z-index: 900;
+        background: var(--glass);
+        backdrop-filter: blur(6px);
+        padding: 12px 18px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        font-weight: 700;
+        letter-spacing: 1.8px;
+        text-transform: uppercase;
+        color: #e6f6ff;
+        font-family: "Share Tech Mono", monospace;
+      }
+      .side-panel {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: var(--panel-width);
+        background: linear-gradient(180deg, #0f1318 0%, #0b0f14 100%);
+        z-index: 950;
+        border-right: 1px solid var(--border);
+        padding: 14px 12px;
+        overflow: auto;
+      }
+      .side-panel::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, var(--accent), var(--accent2));
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 8px 14px;
+      }
+      .flag {
+        width: 52px;
+        height: 34px;
+        border-radius: 8px;
+        background: linear-gradient(90deg, #0033a0 0 33%, #ffd200 33% 66%, #da291c 66% 100%);
+      }
+      .brand h1 {
+        margin: 0;
+        font-size: 24px;
+        color: #ffffff;
+      }
+      .category {
+        border-radius: 14px;
+        margin-bottom: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 10px 12px;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.2s ease;
+      }
+      .category:hover {
+        transform: translateX(2px);
+        border-color: rgba(0, 200, 255, 0.35);
+      }
+      .category.active {
+        box-shadow: 0 0 0 1px var(--accent), 0 10px 24px rgba(0, 0, 0, 0.45);
+      }
+      .category h3 {
+        margin: 0 0 4px;
+        font-size: 18px;
+        color: #f7fbff;
+        text-shadow: 0 1px 1px rgba(0, 0, 0, 0.55);
+      }
+      .category p {
+        margin: 0;
+        opacity: 0.9;
+        font-size: 14px;
+        line-height: 1.3;
+        color: rgba(245, 251, 255, 0.96);
+        text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+      }
+      .cat-red {
+        background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+      }
+      .cat-blue {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      }
+      .cat-green {
+        background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+      }
+      .cat-yellow {
+        background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+      }
+      .cat-cyan {
+        background: linear-gradient(135deg, #06b6d4 0%, #0e7490 100%);
+      }
+      .filters {
+        position: absolute;
+        top: 16px;
+        right: 18px;
+        z-index: 900;
+        display: flex;
+        gap: 8px;
+      }
+      .chip {
+        border: 1px solid var(--border);
+        background: rgba(15, 19, 24, 0.85);
+        backdrop-filter: blur(6px);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-size: 13px;
+        font-family: "Rajdhani", sans-serif;
+        font-weight: 700;
+        transition: all 0.2s ease;
+      }
+      .chip.on {
+        background: rgba(22, 30, 40, 0.94);
+        border-color: rgba(122, 146, 171, 0.95);
+        color: #f3f8fe;
+        box-shadow: inset 0 0 0 1px rgba(201, 217, 234, 0.18), 0 0 18px rgba(148, 183, 216, 0.52);
+      }
+      .bottom-tools {
+        position: absolute;
+        left: calc(var(--panel-width) + 16px);
+        bottom: 20px;
+        z-index: 900;
+        display: flex;
+        gap: 8px;
+      }
+      .tool-btn {
+        padding: 9px 14px;
+        border: 1px solid var(--border);
+        background: rgba(15, 19, 24, 0.88);
+        color: var(--text);
+        border-radius: 10px;
+        cursor: pointer;
+        font-family: "Rajdhani", sans-serif;
+        font-weight: 700;
+        transition: all 0.2s ease;
+      }
+      .tool-btn.active {
+        background: rgba(22, 30, 40, 0.94);
+        border-color: rgba(122, 146, 171, 0.95);
+        color: #f3f8fe;
+        box-shadow: inset 0 0 0 1px rgba(201, 217, 234, 0.2), 0 0 20px rgba(148, 183, 216, 0.58), 0 8px 18px rgba(0, 0, 0, 0.42);
+        text-shadow: 0 0 8px rgba(221, 236, 252, 0.6);
+      }
+      .legend {
+        position: absolute;
+        right: 18px;
+        bottom: 18px;
+        z-index: 900;
+        background: rgba(15, 19, 24, 0.9);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 12px;
+        color: var(--text);
+      }
+      .legend-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 4px;
+      }
+      .legend-line {
+        width: 20px;
+        height: 4px;
+        border-radius: 4px;
+      }
+      .popup-title {
+        margin: 0 0 4px;
+        color: #23344d;
+      }
+      .popup-sub {
+        margin: 0;
+        color: #445166;
+      }
+      .leaflet-popup-content-wrapper.route-popup-wrap {
+        border-radius: 16px;
+        padding: 0;
+        overflow: hidden;
+        background: transparent;
+        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45);
+        cursor: default;
+      }
+      .leaflet-popup-content.route-popup-content {
+        margin: 0;
+        width: 248px !important;
+        cursor: default;
+      }
+      .route-popup-card {
+        background: #111720;
+        color: #dfeeff;
+        border-radius: 16px;
+        overflow: hidden;
+        width: 248px;
+        border: 3px solid var(--route-color, #2f72ff);
+        box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+        cursor: default;
+      }
+      .route-popup-card,
+      .route-popup-card * {
+        pointer-events: auto;
+      }
+      .route-popup-media {
+        display: block;
+        position: relative;
+        height: 132px;
+        cursor: pointer;
+      }
+      .route-popup-media img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .route-popup-meta {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: rgba(8, 13, 21, 0.9);
+        color: #fff;
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .route-popup-body {
+        padding: 9px 10px 11px;
+      }
+      .route-popup-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: 0.8px;
+        color: #f1f8ff;
+      }
+      .route-popup-actions {
+        margin-top: 7px;
+        display: flex;
+        gap: 7px;
+      }
+      .icon-btn {
+        border: 1px solid #29374a;
+        background: #0f141d;
+        color: #9ec3de;
+        border-radius: 999px;
+        min-width: 31px;
+        height: 31px;
+        font-size: 15px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .icon-btn.heart.active {
+        color: #ff517f;
+        border-color: #ff7ba0;
+        background: rgba(255, 81, 127, 0.12);
+      }
+      .side-panel-footer {
+        position: sticky;
+        bottom: 0;
+        padding-top: 10px;
+        margin-top: 8px;
+        background: linear-gradient(180deg, rgba(14, 26, 43, 0) 0%, rgba(14, 26, 43, 0.95) 35%);
+      }
+      .reset-map-btn {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: rgba(12, 18, 26, 0.92);
+        color: var(--text);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 14px;
+        cursor: pointer;
+        font-family: "Rajdhani", sans-serif;
+        font-weight: 700;
+      }
+      .reset-map-btn:hover {
+        background: rgba(18, 28, 40, 0.95);
+        color: #e8f7ff;
+      }
+      @media (max-width: 980px) {
+        :root {
+          --panel-width: 300px;
+        }
+        .title-bar {
+          left: calc(var(--panel-width) + 12px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="map"></div>
+      <aside class="side-panel" id="categories"></aside>
+      <div class="title-bar">Harta Interactiva Turistica Romania</div>
+      <div class="filters">
+        <button class="chip on" data-type-filter="all">Toate</button>
+        <button class="chip on" data-type-filter="castle">Castele</button>
+        <button class="chip on" data-type-filter="monastery">Manastiri</button>
+        <button class="chip on" data-type-filter="mountain">Munti</button>
+      </div>
+      <div class="bottom-tools">
+        <button class="tool-btn" data-layer="relief">Relief</button>
+        <button class="tool-btn" data-layer="roads">Drumuri</button>
+        <button class="tool-btn active" data-layer="attractions">Atractii</button>
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const categories = [
+        {
+          id: "cetati",
+          title: "1. Traseul Cetatilor",
+          desc: "Sibiu, Brasov, Sighisoara, Rasnov, Hunedoara",
+          color: "#e52b2b",
+          className: "cat-red",
+          type: "castle",
+          route: [
+            [45.7983, 24.1256],
+            [45.774, 24.35],
+            [45.73, 24.72],
+            [45.66, 25.17],
+            [45.6579, 25.6012],
+            [45.5914, 25.4638],
+            [45.79, 25.12],
+            [46.02, 24.9],
+            [46.2196, 24.7936],
+            [46.05, 24.35],
+            [45.9, 23.75],
+            [45.7492, 22.8889]
+          ],
+          points: [
+            { name: "Sibiu", lat: 45.7983, lng: 24.1256 },
+            { name: "Brasov", lat: 45.6579, lng: 25.6012 },
+            { name: "Rasnov", lat: 45.5914, lng: 25.4638 },
+            { name: "Sighisoara", lat: 46.2196, lng: 24.7936 },
+            { name: "Castelul Corvinilor", lat: 45.7492, lng: 22.8889 }
+          ]
+        },
+        {
+          id: "manastiri",
+          title: "2. Traseul Manastirilor si Bisericilor",
+          desc: "Suceava, Voronet, Putna, Humor, Agapia",
+          color: "#2f72ff",
+          className: "cat-blue",
+          type: "monastery",
+          route: [
+            [47.6514, 26.2556],
+            [47.56, 26.03],
+            [47.5178, 25.8656],
+            [47.66, 25.82],
+            [47.8679, 25.6038],
+            [47.73, 25.71],
+            [47.5985, 25.8668],
+            [47.42, 26.04],
+            [47.1667, 26.2667]
+          ],
+          points: [
+            { name: "Suceava", lat: 47.6514, lng: 26.2556 },
+            { name: "Voronet", lat: 47.5178, lng: 25.8656 },
+            { name: "Putna", lat: 47.8679, lng: 25.6038 },
+            { name: "Humor", lat: 47.5985, lng: 25.8668 },
+            { name: "Agapia", lat: 47.1667, lng: 26.2667 }
+          ]
+        },
+        {
+          id: "carpati",
+          title: "3. Aventura in Carpati",
+          desc: "Transfagarasan, Transalpina, Cheile Nerei, Retezat",
+          color: "#27c05d",
+          className: "cat-green",
+          type: "mountain",
+          route: [
+            [45.6206, 24.6161],
+            [45.603, 24.51],
+            [45.566, 24.42],
+            [45.53, 24.31],
+            [45.495, 24.19],
+            [45.458, 24.06],
+            [45.43, 23.95],
+            [45.402, 23.81],
+            [45.3716, 23.6696],
+            [45.35, 23.57],
+            [45.33, 23.45],
+            [45.3, 23.34],
+            [45.27, 23.23],
+            [45.23, 23.08],
+            [45.19, 22.93],
+            [45.15, 22.79],
+            [45.1, 22.64],
+            [45.05, 22.48],
+            [45.0, 22.32],
+            [44.95, 22.15],
+            [44.905, 21.95],
+            [44.8612, 21.7363],
+            [44.93, 21.83],
+            [45.0, 21.95],
+            [45.07, 22.08],
+            [45.14, 22.22],
+            [45.19, 22.35],
+            [45.24, 22.48],
+            [45.28, 22.6],
+            [45.32, 22.73],
+            [45.35, 22.82],
+            [45.3732, 22.8881]
+          ],
+          branches: [
+            [
+              [45.36, 22.86],
+              [45.42, 22.72],
+              [45.46, 22.58],
+              [45.5, 22.42],
+              [45.53, 22.24],
+              [45.54, 22.08],
+              [45.52, 21.92],
+              [45.47, 21.77],
+              [45.39, 21.64]
+            ]
+          ],
+          points: [
+            { name: "Transfagarasan", lat: 45.6206, lng: 24.6161 },
+            { name: "Transalpina", lat: 45.3716, lng: 23.6696 },
+            { name: "Cheile Nerei", lat: 44.8612, lng: 21.7363 },
+            { name: "Retezat", lat: 45.3732, lng: 22.8881 }
+          ]
+        },
+        {
+          id: "traditii",
+          title: "4. Traditii si Folclor Maramures",
+          desc: "Sapanta, Sighet, Viseu de Sus, Barsana",
+          color: "#f0b120",
+          className: "cat-yellow",
+          type: "mountain",
+          route: [
+            [47.966, 23.695],
+            [47.94, 23.8],
+            [47.9285, 23.8883],
+            [47.89, 24.03],
+            [47.8257, 24.0595],
+            [47.78, 24.25],
+            [47.716, 24.434]
+          ],
+          points: [
+            { name: "Sapanta", lat: 47.966, lng: 23.695 },
+            { name: "Sighetu Marmatiei", lat: 47.9285, lng: 23.8883 },
+            { name: "Viseu de Sus", lat: 47.716, lng: 24.434 },
+            { name: "Barsana", lat: 47.8257, lng: 24.0595 }
+          ]
+        },
+        {
+          id: "delta",
+          title: "5. Delta, Mare si Istorie",
+          desc: "Delta Dunarii, Tulcea, Constanta, Mangalia",
+          color: "#2abfe8",
+          className: "cat-cyan",
+          type: "castle",
+          route: [
+            [45.184, 29.384],
+            [45.1792, 28.8043],
+            [44.95, 28.95],
+            [44.62, 28.9],
+            [44.38, 28.77],
+            [44.1598, 28.6348],
+            [43.96, 28.63],
+            [43.8152, 28.5836]
+          ],
+          points: [
+            { name: "Tulcea", lat: 45.1792, lng: 28.8043 },
+            { name: "Constanta", lat: 44.1598, lng: 28.6348 },
+            { name: "Mangalia", lat: 43.8152, lng: 28.5836 },
+            { name: "Delta Dunarii", lat: 45.184, lng: 29.384 }
+          ]
+        }
+      ];
+
+      const baseLayers = {
+        relief: L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+          maxZoom: 17,
+          attribution: "&copy; OpenStreetMap contributors, SRTM"
+        }),
+        roads: L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "&copy; OpenStreetMap contributors"
+        }),
+        attractions: L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "&copy; OpenStreetMap contributors"
+        })
+      };
+
+      const map = L.map("map", {
+        zoomControl: false,
+        layers: [baseLayers.attractions]
+      }).setView([45.8, 24.9], 7);
+      L.control.zoom({ position: "bottomright" }).addTo(map);
+
+      const routeLayers = new Map();
+      const markerLayers = new Map();
+      const waypointLayers = new Map();
+      const snappedRouteCache = new Map();
+      const markerRouteMeta = new Map();
+      const likedLocations = new Set();
+      const reviewByLocation = new Map();
+      const cityMarkerRefs = [];
+      const enabledTypes = new Set(["castle", "monastery", "mountain"]);
+      let activeCategory = null;
+      let activePopupMarker = null;
+      let isPopupHovered = false;
+
+      const routeImagesByCategory = {
+        cetati: "img/hunedoara.jpg",
+        manastiri: "img/voronet.jpg",
+        carpati: "img/transalpina.jpg",
+        traditii: "img/sapanta.jpg",
+        delta: "img/delta.jpg"
+      };
+
+      const categoriesEl = document.getElementById("categories");
+      categoriesEl.innerHTML = `
+        <div class="brand">
+          <div class="flag"></div>
+          <div>
+            <h1>exploreaza.ro</h1>
+            <div style="opacity:.8">rute tematice interactive</div>
+          </div>
+        </div>
+        <div class="side-panel-footer">
+          <button class="reset-map-btn" id="resetMapViewBtn" title="Arata harta completa">⌂ Arata toata harta</button>
+        </div>
+      `;
+
+      async function fetchRoadGeometry(segment) {
+        if (!segment || segment.length < 2) return segment || [];
+        const coords = segment.map((p) => `${p[1]},${p[0]}`).join(";");
+        const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&continue_straight=true`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Routing API unavailable");
+        const data = await response.json();
+        const geometry = data?.routes?.[0]?.geometry?.coordinates;
+        if (!geometry?.length) throw new Error("No route geometry");
+        return geometry.map((c) => [c[1], c[0]]);
+      }
+
+      function simplifyPolyline(points, factor = 12) {
+        if (!points || points.length <= 3) return points || [];
+        const simplified = [points[0]];
+        const step = Math.max(2, factor);
+        for (let i = step; i < points.length - 1; i += step) {
+          simplified.push(points[i]);
+        }
+        simplified.push(points[points.length - 1]);
+        return simplified;
+      }
+
+      function clearLayerGroup(group) {
+        group.eachLayer((layer) => group.removeLayer(layer));
+      }
+
+      function computeReviewValue(name) {
+        let hash = 0;
+        for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) % 997;
+        let raw = 4.55 + (hash % 40) * 0.01;
+        const used = new Set([...reviewByLocation.values()]);
+        while (used.has(raw.toFixed(2))) raw += 0.01;
+        return raw.toFixed(2);
+      }
+
+      function buildPopupHtml(cat, point) {
+        const imageSrc = routeImagesByCategory[cat.id];
+        const locationKey = `${cat.id}:${point.name}`;
+        if (!reviewByLocation.has(locationKey)) {
+          reviewByLocation.set(locationKey, computeReviewValue(locationKey));
+        }
+        const review = reviewByLocation.get(locationKey);
+        const liked = likedLocations.has(locationKey);
+        return `
+          <div class="route-popup-card" data-location-key="${locationKey}" style="--route-color:${cat.color}">
+            <a class="route-popup-media" href="tur.html" title="Deschide tur" target="_self">
+              <img src="${imageSrc}" alt="${point.name}" />
+              <div class="route-popup-meta">⭐ ${review}</div>
+            </a>
+            <div class="route-popup-body">
+              <h4 class="route-popup-title">${point.name.toUpperCase()}</h4>
+              <div class="route-popup-actions">
+                <button type="button" class="icon-btn share" data-action="share" title="Share">↗</button>
+                <button type="button" class="icon-btn heart ${liked ? "active" : ""}" data-action="like" title="Like">${liked ? "♥" : "♡"}</button>
+                <a class="icon-btn" data-action="open3d" href="tur.html" title="Deschide 3D">3D</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function drawSegmentedRoute(catId, segments) {
+        const routeGroup = routeLayers.get(catId);
+        const waypointDots = waypointLayers.get(catId);
+        const cat = categories.find((c) => c.id === catId);
+        clearLayerGroup(routeGroup);
+        clearLayerGroup(waypointDots);
+
+        segments.forEach((segment) => {
+          const routeForRender = simplifyPolyline(segment, 12);
+          L.polyline(routeForRender, {
+            color: cat.color,
+            weight: 2.4,
+            opacity: 0.72,
+            lineJoin: "round"
+          }).addTo(routeGroup);
+
+          // Keep only a few colored anchor points for readability.
+          routeForRender.forEach((latLng, idx) => {
+            if (idx % 6 !== 0 || idx === 0 || idx === routeForRender.length - 1) return;
+            L.circleMarker(latLng, {
+              radius: 2.4,
+              color: cat.color,
+              weight: 0,
+              fillColor: cat.color,
+              fillOpacity: 0.9
+            }).addTo(waypointDots);
+          });
+        });
+
+        snappedRouteCache.set(catId, segments.map((s) => simplifyPolyline(s, 12)));
+        applyCategoryStyles();
+      }
+
+      function applyCategoryStyles() {
+        const hasActiveCategory = Boolean(activeCategory);
+        categories.forEach((cat) => {
+          const route = routeLayers.get(cat.id);
+          const waypoints = waypointLayers.get(cat.id);
+          const isActive = cat.id === activeCategory;
+          route.eachLayer((line) => {
+            line.setStyle({
+              opacity: hasActiveCategory ? (isActive ? 0.88 : 0.28) : 0.72,
+              weight: hasActiveCategory ? (isActive ? 3.4 : 1.8) : 2.4
+            });
+          });
+          waypoints.eachLayer((layer) => {
+            layer.setStyle({
+              fillOpacity: hasActiveCategory ? (isActive ? 0.9 : 0.25) : 0.7
+            });
+          });
+        });
+      }
+
+      function resetFullMapView() {
+        activeCategory = null;
+        document.querySelectorAll(".category").forEach((el) => el.classList.remove("active"));
+        applyCategoryStyles();
+        map.setView([45.8, 24.9], 7);
+      }
+
+      function closeAllPopups() {
+        map.closePopup();
+        activePopupMarker = null;
+      }
+
+      function openMarkerPopup(marker) {
+        if (activePopupMarker && activePopupMarker !== marker) {
+          activePopupMarker.closePopup();
+        }
+        marker.openPopup();
+        activePopupMarker = marker;
+      }
+
+      function isPointerOverOrNearActivePopup(originalEvent) {
+        if (!activePopupMarker || !originalEvent) return false;
+        const popupEl = activePopupMarker.getPopup()?.getElement();
+        if (!popupEl) return false;
+        const card = popupEl.querySelector(".route-popup-card");
+        if (!card) return false;
+
+        const directTarget =
+          originalEvent.target instanceof Element ? originalEvent.target : null;
+        if (directTarget?.closest(".route-popup-card")) return true;
+
+        const x = originalEvent.clientX;
+        const y = originalEvent.clientY;
+        const rect = card.getBoundingClientRect();
+        const pad = 14;
+        const insideExpandedRect =
+          x >= rect.left - pad &&
+          x <= rect.right + pad &&
+          y >= rect.top - pad &&
+          y <= rect.bottom + pad;
+        return insideExpandedRect;
+      }
+
+      function getAdaptiveHitRadius(point) {
+        let minDistance = Number.POSITIVE_INFINITY;
+        categories.forEach((cat) => {
+          cat.points.forEach((other) => {
+            if (other === point) return;
+            const dLat = point.lat - other.lat;
+            const dLng = point.lng - other.lng;
+            const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+            if (dist < minDistance) minDistance = dist;
+          });
+        });
+        // Dense clusters: smaller radius; isolated cities: larger radius.
+        return minDistance < 0.38 ? 12 : 22;
+      }
+
+      async function runShareForLocationKey(key) {
+        const locationInfo = markerRouteMeta.get(key);
+        const shareText = `Descopera ${locationInfo?.point?.name || "aceasta locatie"} pe harta turistica`;
+        try {
+          // file:// is not a secure context for clipboard/share in many browsers.
+          if (window.location.protocol !== "file:" && navigator.share) {
+            await navigator.share({ title: "Exploreaza Romania", text: shareText, url: window.location.href });
+            return;
+          }
+          if (window.location.protocol !== "file:" && navigator.clipboard) {
+            await navigator.clipboard.writeText(`${shareText} - ${window.location.href}`);
+            return;
+          }
+          window.prompt("Copy share text:", `${shareText} - ${window.location.href}`);
+        } catch (error) {
+          // No-op: user cancelled share.
+        }
+      }
+
+      async function buildSnappedRoute(cat) {
+        const plannedSegments = [cat.route || cat.points.map((p) => [p.lat, p.lng]), ...(cat.branches || [])];
+        const snappedSegments = [];
+        for (const segment of plannedSegments) {
+          const routingInput = simplifyPolyline(segment, 2);
+          try {
+            const snapped = await fetchRoadGeometry(routingInput);
+            snappedSegments.push(snapped);
+          } catch (error) {
+            snappedSegments.push(routingInput);
+          }
+        }
+        drawSegmentedRoute(cat.id, snappedSegments);
+      }
+
+      categories.forEach((cat) => {
+        const card = document.createElement("div");
+        card.className = `category ${cat.className}`;
+        card.dataset.id = cat.id;
+        card.innerHTML = `<h3>${cat.title}</h3><p>${cat.desc}</p>`;
+        card.addEventListener("click", () => setActiveCategory(cat.id));
+        categoriesEl.appendChild(card);
+
+        const routeGroup = L.layerGroup();
+        routeGroup.addTo(map);
+        routeLayers.set(cat.id, routeGroup);
+
+        const waypointDots = L.layerGroup();
+        waypointDots.addTo(map);
+        waypointLayers.set(cat.id, waypointDots);
+
+        const group = L.layerGroup();
+        cat.points.forEach((p) => {
+          const marker = L.circleMarker([p.lat, p.lng], {
+            radius: 7,
+            className: "city-marker",
+            color: "#fff",
+            weight: 2,
+            fillColor: cat.color,
+            fillOpacity: 0.95
+          });
+          const adaptiveRadius = getAdaptiveHitRadius(p);
+          const hitArea = L.circleMarker([p.lat, p.lng], {
+            radius: adaptiveRadius,
+            className: "city-hit-area",
+            color: cat.color,
+            weight: 0,
+            opacity: 0,
+            fillColor: cat.color,
+            fillOpacity: 0.001
+          });
+          marker.bindPopup(buildPopupHtml(cat, p), {
+            className: "route-popup-wrap",
+            closeButton: false,
+            autoClose: false,
+            closeOnClick: false,
+            interactive: true
+          });
+          hitArea.bindPopup(marker.getPopup());
+          markerRouteMeta.set(`${cat.id}:${p.name}`, { cat, point: p });
+
+          const openPopup = () => openMarkerPopup(marker);
+
+          marker.on("mouseover", openPopup);
+          marker.on("mousemove", openPopup);
+          hitArea.on("mouseover", openPopup);
+          hitArea.on("mousemove", openPopup);
+
+          marker.addTo(group);
+          hitArea.addTo(group);
+          cityMarkerRefs.push({ marker, hitArea, radius: adaptiveRadius });
+        });
+        group.addTo(map);
+        markerLayers.set(cat.id, group);
+
+        buildSnappedRoute(cat);
+      });
+
+      function setActiveCategory(id) {
+        activeCategory = id;
+        document.querySelectorAll(".category").forEach((el) => {
+          el.classList.toggle("active", el.dataset.id === id);
+        });
+
+        applyCategoryStyles();
+
+        const selected = categories.find((c) => c.id === id);
+        const snapped = snappedRouteCache.get(id);
+        const allPoints = snapped
+          ? snapped.flat()
+          : [
+              ...(selected.route || selected.points.map((p) => [p.lat, p.lng])),
+              ...((selected.branches || []).flat())
+            ];
+        const bounds = L.latLngBounds(allPoints);
+        map.fitBounds(bounds.pad(0.5));
+      }
+
+      function refreshByType() {
+        categories.forEach((cat) => {
+          const visible = enabledTypes.has(cat.type);
+          const route = routeLayers.get(cat.id);
+          const markers = markerLayers.get(cat.id);
+          const waypoints = waypointLayers.get(cat.id);
+          if (visible) {
+            route.addTo(map);
+            markers.addTo(map);
+            waypoints.addTo(map);
+          } else {
+            map.removeLayer(route);
+            map.removeLayer(markers);
+            map.removeLayer(waypoints);
+          }
+        });
+      }
+
+      document.querySelectorAll("[data-type-filter]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const type = btn.dataset.typeFilter;
+          if (type === "all") {
+            const turnOn = !btn.classList.contains("on");
+            document.querySelectorAll("[data-type-filter]").forEach((b) => {
+              if (b.dataset.typeFilter !== "all") {
+                b.classList.toggle("on", turnOn);
+                if (turnOn) enabledTypes.add(b.dataset.typeFilter);
+                else enabledTypes.delete(b.dataset.typeFilter);
+              }
+            });
+            btn.classList.toggle("on", turnOn);
+          } else {
+            if (enabledTypes.has(type)) enabledTypes.delete(type);
+            else enabledTypes.add(type);
+            btn.classList.toggle("on");
+            document.querySelector('[data-type-filter="all"]').classList.toggle(
+              "on",
+              enabledTypes.size === 3
+            );
+          }
+          refreshByType();
+        });
+      });
+
+      document.querySelectorAll("[data-layer]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const layerId = btn.dataset.layer;
+          Object.values(baseLayers).forEach((layer) => map.removeLayer(layer));
+          baseLayers[layerId].addTo(map);
+          document.querySelectorAll("[data-layer]").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+        });
+      });
+
+      map.on("popupopen", (event) => {
+        const popupEl = event.popup.getElement();
+        if (!popupEl) return;
+        const likeBtn = popupEl.querySelector('[data-action="like"]');
+        const shareBtn = popupEl.querySelector('[data-action="share"]');
+        const open3dBtn = popupEl.querySelector('[data-action="open3d"]');
+        const card = popupEl.querySelector(".route-popup-card");
+        if (!card) return;
+        const key = card.dataset.locationKey;
+        isPopupHovered = false;
+        card.onmouseenter = () => {
+          isPopupHovered = true;
+        };
+        card.onmouseleave = () => {
+          isPopupHovered = false;
+        };
+        if (likeBtn) likeBtn.onclick = null;
+        if (shareBtn) shareBtn.onclick = null;
+        if (open3dBtn) open3dBtn.onclick = null;
+      });
+      map.on("popupclose", () => {
+        isPopupHovered = false;
+      });
+
+      document.getElementById("resetMapViewBtn")?.addEventListener("click", resetFullMapView);
+      document.addEventListener(
+        "click",
+        async (event) => {
+          const target = event.target instanceof Element ? event.target : null;
+          if (!target) return;
+          const actionEl = target.closest("[data-action]");
+          if (!actionEl) return;
+          const card = actionEl.closest(".route-popup-card");
+          if (!card) return;
+          const key = card.dataset.locationKey;
+          if (!key) return;
+          const action = actionEl.getAttribute("data-action");
+          if (!action) return;
+
+          event.preventDefault();
+          event.stopPropagation();
+          isPopupHovered = true;
+
+          if (action === "like") {
+            const isLiked = likedLocations.has(key);
+            if (isLiked) likedLocations.delete(key);
+            else likedLocations.add(key);
+            actionEl.classList.toggle("active", !isLiked);
+            actionEl.textContent = !isLiked ? "♥" : "♡";
+            return;
+          }
+          if (action === "share") {
+            await runShareForLocationKey(key);
+            return;
+          }
+          if (action === "open3d") {
+            window.location.href = "tur.html";
+          }
+        },
+        true
+      );
+      map.on("mousemove", (event) => {
+        if (!activePopupMarker || isPopupHovered) return;
+        if (document.querySelector(".route-popup-card:hover")) return;
+        if (isPointerOverOrNearActivePopup(event.originalEvent)) return;
+        const mousePoint = event.containerPoint;
+        let insideAnyHoverArea = false;
+        for (const ref of cityMarkerRefs) {
+          const markerPoint = map.latLngToContainerPoint(ref.marker.getLatLng());
+          const dx = mousePoint.x - markerPoint.x;
+          const dy = mousePoint.y - markerPoint.y;
+          if (Math.sqrt(dx * dx + dy * dy) <= ref.radius + 2) {
+            insideAnyHoverArea = true;
+            break;
+          }
+        }
+        if (!insideAnyHoverArea) closeAllPopups();
+      });
+
+      function renderLegend() {
+        const legend = document.getElementById("legend");
+        legend.innerHTML = `<strong>Legenda Rute</strong>`;
+        categories.forEach((cat) => {
+          legend.innerHTML += `
+            <div class="legend-row">
+              <span class="legend-line" style="background:${cat.color}"></span>
+              <span>${cat.title.replace(/^\d+\.\s*/, "")}</span>
+            </div>
+          `;
+        });
+      }
+
+      renderLegend();
+      setActiveCategory("cetati");
+    </script>
+  </body>
+</html>

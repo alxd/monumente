@@ -1,0 +1,1691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="description" content="">
+	<meta name="author" content="">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<title>3D Model Viewer</title>
+
+	<link rel="stylesheet" type="text/css" href="../build/potree/potree.css">
+	<link rel="stylesheet" type="text/css" href="../libs/jquery-ui/jquery-ui.min.css">
+	<link rel="stylesheet" type="text/css" href="../libs/openlayers3/ol.css">
+	<link rel="stylesheet" type="text/css" href="../libs/spectrum/spectrum.css">
+	<link rel="stylesheet" type="text/css" href="../libs/jstree/themes/mixed/style.css">
+
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
+
+	<style>
+		/* ────────────────────────────────────────────────────────────
+		   HIDE POTREE'S DEFAULT UI COMPLETELY
+		   (HTML is left intact in the page, only visually hidden)
+		   ──────────────────────────────────────────────────────────── */
+		#potree_sidebar_container,
+		#sidebar_root,
+		#potree_quick_buttons,
+		#potree_map_toggle,
+		#potree_description,
+		.potree_menu_toggle {
+			display: none !important;
+			visibility: hidden !important;
+			pointer-events: none !important;
+		}
+
+		/* Push the Potree render area to the right of our custom sidebar */
+		.potree_container {
+			left: var(--panel-w) !important;
+			width: calc(100% - var(--panel-w)) !important;
+		}
+
+		*, *::before, *::after { box-sizing: border-box; }
+
+		:root {
+			--bg: #0a0c0f;
+			--panel: #0f1318;
+			--border: #1e2530;
+			--accent: #00c8ff;
+			--accent2: #ff6b35;
+			--accent3: #a855f7;
+			--text: #c8d4e0;
+			--text-dim: #4a5568;
+			--active-bg: rgba(0, 200, 255, 0.08);
+			--panel-w: 260px;
+		}
+
+		body {
+			margin: 0;
+			background: var(--bg);
+			font-family: 'Rajdhani', sans-serif;
+			color: var(--text);
+			overflow: hidden;
+			height: 100vh;
+		}
+
+		/* ── SIDEBAR (ported from tur.html) ── */
+		#sidebar {
+			position: fixed;
+			left: 0; top: 0;
+			width: var(--panel-w);
+			height: 100vh;
+			background: var(--panel);
+			border-right: 1px solid var(--border);
+			display: flex;
+			flex-direction: column;
+			z-index: 10;
+			overflow-x: hidden;
+			overflow-y: auto;
+		}
+
+		#sidebar::before {
+			content: '';
+			position: absolute;
+			top: 0; left: 0; right: 0;
+			height: 2px;
+			background: linear-gradient(90deg, var(--accent), var(--accent2));
+		}
+
+		.sidebar-header {
+			padding: 28px 20px 20px;
+			border-bottom: 1px solid var(--border);
+		}
+
+		.sidebar-header .label {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 10px;
+			letter-spacing: 3px;
+			color: var(--accent);
+			text-transform: uppercase;
+			margin-bottom: 6px;
+		}
+
+		.sidebar-header h1 {
+			font-size: 22px;
+			font-weight: 700;
+			letter-spacing: 1px;
+			color: #fff;
+			line-height: 1.1;
+		}
+
+		/* ── MODEL LIST ── */
+		.section-title {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 9px;
+			letter-spacing: 3px;
+			color: var(--text-dim);
+			text-transform: uppercase;
+			padding: 20px 20px 10px;
+		}
+
+		#model-list {
+			flex: 1 1 auto;
+			min-height: 0;
+			max-height: min(260px, 38vh);
+			overflow-y: auto;
+			padding: 0 12px;
+		}
+
+		#model-list::-webkit-scrollbar { width: 3px; }
+		#model-list::-webkit-scrollbar-track { background: transparent; }
+		#model-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+		.model-btn {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			width: 100%;
+			padding: 12px 14px;
+			margin-bottom: 4px;
+			background: transparent;
+			border: 1px solid transparent;
+			border-radius: 6px;
+			cursor: pointer;
+			color: var(--text);
+			font-family: 'Rajdhani', sans-serif;
+			font-size: 16px;
+			font-weight: 500;
+			letter-spacing: 0.5px;
+			text-align: left;
+			transition: all 0.2s ease;
+			position: relative;
+			overflow: hidden;
+		}
+
+		.model-btn::before {
+			content: '';
+			position: absolute;
+			left: 0; top: 0; bottom: 0;
+			width: 2px;
+			background: var(--accent);
+			transform: scaleY(0);
+			transition: transform 0.2s ease;
+		}
+
+		.model-btn.person-btn::before { background: var(--accent3); }
+
+		.model-btn:hover {
+			background: var(--active-bg);
+			border-color: var(--border);
+			color: #fff;
+		}
+
+		.model-btn.active {
+			background: var(--active-bg);
+			border-color: rgba(0, 200, 255, 0.25);
+			color: var(--accent);
+		}
+
+		.model-btn.person-btn.active {
+			border-color: rgba(168, 85, 247, 0.3);
+			color: var(--accent3);
+			background: rgba(168, 85, 247, 0.07);
+		}
+
+		.model-btn.active::before { transform: scaleY(1); }
+
+		.model-btn .icon {
+			width: 32px;
+			height: 32px;
+			border-radius: 6px;
+			background: var(--border);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			flex-shrink: 0;
+			font-size: 15px;
+			transition: background 0.2s;
+		}
+
+		.model-btn.active .icon            { background: rgba(0, 200, 255, 0.15); }
+		.model-btn.person-btn.active .icon { background: rgba(168, 85, 247, 0.15); }
+
+		.model-btn .name { flex: 1; }
+
+		.model-btn .sub {
+			font-size: 11px;
+			color: var(--text-dim);
+			font-weight: 300;
+			display: block;
+			line-height: 1;
+			margin-top: 2px;
+		}
+
+		.model-btn.active .sub             { color: rgba(0, 200, 255, 0.5); }
+		.model-btn.person-btn.active .sub  { color: rgba(168, 85, 247, 0.5); }
+
+		/* ── CONTROLS SECTION ── */
+		.controls-section {
+			flex-shrink: 0;
+			border-top: 1px solid var(--border);
+			padding: 16px 20px 20px;
+		}
+
+		.toggle-row {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 10px 0;
+		}
+
+		.toggle-label { display: flex; flex-direction: column; }
+		.toggle-label span  { font-size: 15px; font-weight: 500; color: var(--text); }
+		.toggle-label small { font-size: 11px; color: var(--text-dim); font-weight: 300; }
+
+		.toggle {
+			position: relative;
+			width: 44px; height: 24px;
+			flex-shrink: 0;
+		}
+
+		.toggle input { opacity: 0; width: 0; height: 0; }
+
+		.toggle-track {
+			position: absolute;
+			inset: 0;
+			background: var(--border);
+			border-radius: 24px;
+			cursor: pointer;
+			transition: background 0.25s;
+		}
+
+		.toggle-track::after {
+			content: '';
+			position: absolute;
+			left: 3px; top: 3px;
+			width: 18px; height: 18px;
+			background: var(--text-dim);
+			border-radius: 50%;
+			transition: transform 0.25s, background 0.25s;
+		}
+
+		.toggle input:checked + .toggle-track {
+			background: rgba(0, 200, 255, 0.2);
+			border: 1px solid rgba(0, 200, 255, 0.4);
+		}
+
+		.toggle input:checked + .toggle-track::after {
+			transform: translateX(20px);
+			background: var(--accent);
+			box-shadow: 0 0 8px rgba(0, 200, 255, 0.6);
+		}
+
+		#walk-toggle:checked + .toggle-track {
+			background: rgba(168, 85, 247, 0.2);
+			border: 1px solid rgba(168, 85, 247, 0.4);
+		}
+		#walk-toggle:checked + .toggle-track::after {
+			background: var(--accent3);
+			box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+		}
+
+		#walk-controls {
+			display: none;
+			padding: 10px 0 0;
+			border-top: 1px solid var(--border);
+			margin-top: 4px;
+		}
+		#walk-controls.visible { display: block; }
+
+		.slider-row {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			padding: 4px 0 6px;
+		}
+
+		.slider-row label {
+			font-size: 13px;
+			color: var(--text-dim);
+			white-space: nowrap;
+			font-weight: 300;
+		}
+
+		input[type=range] {
+			flex: 1;
+			accent-color: var(--accent3);
+			cursor: pointer;
+		}
+
+		#walk-speed-val {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 11px;
+			color: var(--accent3);
+			width: 24px;
+			text-align: right;
+		}
+
+		#model-scale-val {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 11px;
+			color: var(--accent);
+			width: 36px;
+			text-align: right;
+		}
+
+		#person-chroma-panel {
+			display: none;
+			visibility: visible;
+			padding: 14px 14px 14px;
+			margin: 12px 0 14px;
+			border-radius: 8px;
+			border: 1px solid rgba(0, 200, 255, 0.35);
+			background: rgba(0, 200, 255, 0.07);
+			box-shadow: inset 0 0 0 1px rgba(0, 200, 255, 0.08);
+		}
+		#person-chroma-panel.visible { display: block; }
+
+		#person-chroma-panel .chroma-panel-title {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 10px;
+			letter-spacing: 2.5px;
+			color: var(--accent);
+			text-transform: uppercase;
+			margin-bottom: 10px;
+		}
+
+		#person-video-panel {
+			display: none;
+			padding: 6px 0 8px;
+		}
+		#person-video-panel.visible { display: block; }
+
+		.person-video-heading {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 9px;
+			letter-spacing: 2px;
+			color: var(--accent3);
+			text-transform: uppercase;
+			margin-bottom: 10px;
+		}
+
+		#person-video-panel > label {
+			display: block;
+			font-size: 13px;
+			color: var(--text-dim);
+			font-weight: 300;
+			margin-bottom: 8px;
+		}
+
+		#person-video-panel .slider-row input[type=range] { accent-color: var(--accent3); }
+
+		#person-video-scale-val {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 11px;
+			color: var(--accent3);
+			width: 36px;
+			text-align: right;
+		}
+
+		.person-video-buttons {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+		}
+
+		.person-video-btn {
+			flex: 1;
+			min-width: 0;
+			padding: 0;
+			border: 2px solid var(--border);
+			border-radius: 8px;
+			background: #0a0d12;
+			cursor: pointer;
+			overflow: hidden;
+			transition: border-color 0.2s, box-shadow 0.2s;
+		}
+
+		.person-video-btn:hover { border-color: rgba(0, 200, 255, 0.35); }
+
+		.person-video-btn.active {
+			border-color: var(--accent);
+			box-shadow: 0 0 0 1px rgba(0, 200, 255, 0.25);
+		}
+
+		.person-video-btn video {
+			display: block;
+			width: 100%;
+			height: 52px;
+			object-fit: cover;
+			pointer-events: none;
+			background: #050608;
+		}
+
+		.person-video-btn .pv-caption {
+			display: block;
+			font-size: 10px;
+			letter-spacing: 0.5px;
+			color: var(--text-dim);
+			padding: 5px 6px 6px;
+			text-align: center;
+			line-height: 1.2;
+			font-weight: 500;
+		}
+
+		.person-video-btn.active .pv-caption { color: var(--accent); }
+
+		.chroma-mode-buttons {
+			display: flex;
+			gap: 8px;
+			flex-wrap: nowrap;
+			margin-top: 0;
+		}
+
+		.chroma-mode-btn {
+			flex: 1 1 0;
+			min-width: 0;
+			min-height: 42px;
+			padding: 8px 6px;
+			border-radius: 6px;
+			border: 1px solid rgba(255, 255, 255, 0.18);
+			background: #131920;
+			color: #e8eef5;
+			font-family: 'Rajdhani', sans-serif;
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 0.3px;
+			cursor: pointer;
+			transition: border-color 0.2s, color 0.2s, background 0.2s;
+		}
+
+		.chroma-mode-btn:hover {
+			border-color: rgba(0, 200, 255, 0.35);
+			color: var(--text);
+		}
+
+		.chroma-mode-btn.active {
+			border-color: var(--accent);
+			color: var(--accent);
+			background: rgba(0, 200, 255, 0.06);
+		}
+
+		#model-scale-row input[type=range] { accent-color: var(--accent); }
+
+		#path-hint {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 9px;
+			letter-spacing: 1px;
+			color: rgba(168, 85, 247, 0.5);
+			padding: 4px 0 0;
+			line-height: 1.6;
+		}
+
+		/* ── AUDIO PLAYER ── */
+		.audio-row {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 8px 0 4px;
+			border-top: 1px solid var(--border);
+			margin-top: 6px;
+		}
+
+		.audio-play-btn {
+			width: 32px; height: 32px;
+			border-radius: 50%;
+			background: rgba(168, 85, 247, 0.12);
+			border: 1px solid rgba(168, 85, 247, 0.35);
+			color: var(--accent3);
+			font-size: 13px;
+			cursor: pointer;
+			display: flex; align-items: center; justify-content: center;
+			flex-shrink: 0;
+			transition: all 0.2s;
+		}
+
+		.audio-play-btn:hover {
+			background: rgba(168, 85, 247, 0.25);
+			box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+		}
+
+		.audio-play-btn.playing {
+			background: rgba(168, 85, 247, 0.2);
+			border-color: var(--accent3);
+			box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
+		}
+
+		.audio-info { flex: 1; min-width: 0; }
+
+		.audio-info .audio-name {
+			font-size: 12px;
+			font-weight: 500;
+			color: var(--text);
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+
+		.audio-info .audio-status {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 9px;
+			letter-spacing: 1px;
+			color: var(--text-dim);
+			margin-top: 1px;
+		}
+
+		.audio-info .audio-status.active { color: var(--accent3); }
+
+		#audio-vol {
+			accent-color: var(--accent3);
+			width: 56px;
+			cursor: pointer;
+			flex-shrink: 0;
+		}
+
+		/* ── STATUS BAR ── */
+		#status {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 10px;
+			letter-spacing: 1px;
+			padding: 10px 20px 14px;
+			color: var(--text-dim);
+			border-top: 1px solid var(--border);
+		}
+
+		#status .dot {
+			display: inline-block;
+			width: 6px; height: 6px;
+			border-radius: 50%;
+			background: var(--text-dim);
+			margin-right: 6px;
+			vertical-align: middle;
+			transition: background 0.3s;
+		}
+
+		#status.loading .dot { background: var(--accent2); animation: pulse 0.8s infinite; }
+		#status.ready   .dot { background: #44ff88; }
+		#status.error   .dot { background: #ff4444; }
+
+		@keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.2} }
+
+		/* ── OVERLAY CANVAS (chroma video / GLB models, drawn on top of Potree) ── */
+		#overlay-canvas-wrap {
+			position: fixed;
+			left: var(--panel-w);
+			top: 0; right: 0; bottom: 0;
+			pointer-events: none;
+			z-index: 5;
+		}
+
+		#overlay-canvas-wrap canvas {
+			display: block;
+			width: 100% !important;
+			height: 100% !important;
+			background: transparent;
+		}
+
+		/* ── OVERLAYS ── */
+		#model-name-overlay {
+			position: fixed;
+			bottom: 32px;
+			left: calc(var(--panel-w) + 32px);
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 11px;
+			letter-spacing: 3px;
+			text-transform: uppercase;
+			color: rgba(255,255,255,0.35);
+			pointer-events: none;
+			z-index: 11;
+		}
+
+		#loader-overlay {
+			position: fixed;
+			left: var(--panel-w);
+			top: 0; right: 0; bottom: 0;
+			background: rgba(10, 12, 15, 0.65);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 8;
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 0.3s;
+		}
+		#loader-overlay.visible { opacity: 1; }
+
+		.loader-inner { text-align: center; }
+		.loader-ring {
+			width: 48px; height: 48px;
+			border: 2px solid var(--border);
+			border-top-color: var(--accent);
+			border-radius: 50%;
+			animation: spin 0.8s linear infinite;
+			margin: 0 auto 16px;
+		}
+		@keyframes spin { to { transform: rotate(360deg) } }
+		.loader-text {
+			font-family: 'Share Tech Mono', monospace;
+			font-size: 11px; letter-spacing: 3px; color: var(--text-dim);
+		}
+	</style>
+</head>
+
+<body>
+	<script src="../libs/jquery/jquery-3.1.1.min.js"></script>
+	<script src="../libs/spectrum/spectrum.js"></script>
+	<script src="../libs/jquery-ui/jquery-ui.min.js"></script>
+
+
+	<script src="../libs/other/BinaryHeap.js"></script>
+	<script src="../libs/tween/tween.min.js"></script>
+	<script src="../libs/d3/d3.js"></script>
+	<script src="../libs/proj4/proj4.js"></script>
+	<script src="../libs/openlayers3/ol.js"></script>
+	<script src="../libs/i18next/i18next.js"></script>
+	<script src="../libs/jstree/jstree.js"></script>
+	<script src="../build/potree/potree.js"></script>
+	<script src="../libs/plasio/js/laslaz.js"></script>
+
+	<!-- INCLUDE ADDITIONAL DEPENDENCIES HERE -->
+	<!-- INCLUDE SETTINGS HERE -->
+
+	<!-- Potree container is kept intact (its sidebar is hidden via CSS above) -->
+	<div class="potree_container" style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px; ">
+		<div id="potree_render_area" style="background-image: url('../build/potree/resources/images/background.jpg');"></div>
+		<div id="potree_sidebar_container"> </div>
+	</div>
+
+	<!-- ─────────── CUSTOM SIDEBAR (ported from tur.html) ─────────── -->
+	<div id="sidebar">
+		<div class="sidebar-header">
+			<div class="label">POTREE TOUR</div>
+			<h1>3D<br>Viewer</h1>
+		</div>
+
+		<div class="section-title">Models</div>
+
+		<div id="model-list">
+			<button class="model-btn" data-path="./models/statuie_florilor.glb" data-name="Statuie Florilor" data-type="model">
+				<div class="icon">◈</div>
+				<div class="name">Statuie Florilor<span class="sub">.glb</span></div>
+			</button>
+			<button class="model-btn person-btn"
+					data-name="Persoana M1"
+					data-type="person-m1"
+					data-model="./models/statuie_florilor.glb">
+				<div class="icon">🧍</div>
+				<div class="name">Persoana M1<span class="sub">video + statuie florilor</span></div>
+			</button>
+			<button class="model-btn person-btn"
+					data-name="Persoana"
+					data-type="person">
+				<div class="icon">🧍</div>
+				<div class="name">Persoana<span class="sub">chroma key · mp4</span></div>
+			</button>
+		</div>
+
+		<div class="controls-section">
+			<div class="section-title" style="padding:0 0 8px;">Controls</div>
+
+			<div class="toggle-row">
+				<div class="toggle-label">
+					<span>Auto Rotate</span>
+					<small>Slow spin on Y axis</small>
+				</div>
+				<label class="toggle">
+					<input type="checkbox" id="rotate-toggle">
+					<div class="toggle-track"></div>
+				</label>
+			</div>
+
+			<div id="person-chroma-panel" aria-label="Persoana chroma key shader mode">
+				<div class="chroma-panel-title">Shader · video chroma</div>
+				<div class="chroma-mode-buttons" id="chroma-mode-buttons">
+					<button type="button" class="chroma-mode-btn active" data-chroma="decoded"
+							title="Decode video then key — often best under uneven green">Decoded</button>
+					<button type="button" class="chroma-mode-btn" data-chroma="bright"
+							title="Like Native with lifted brightness — tuned for darker clips">Bright</button>
+					<button type="button" class="chroma-mode-btn" data-chroma="native"
+							title="Original custom shader — strongest edge; may fail on some Windows GPUs">Native</button>
+				</div>
+			</div>
+
+			<div id="person-video-panel">
+				<div class="person-video-heading">Video clip</div>
+				<label>Preview &amp; select</label>
+				<div class="person-video-buttons" id="person-video-buttons">
+					<button type="button" class="person-video-btn active"
+							data-file="video1_green_animation_senior.mp4"
+							title="Green animation senior">
+						<video muted playsinline preload="none"></video>
+						<span class="pv-caption">Green senior</span>
+					</button>
+					<button type="button" class="person-video-btn"
+							data-file="video2_man_sword.mp4"
+							title="Man sword">
+						<video muted playsinline preload="none"></video>
+						<span class="pv-caption">Man sword</span>
+					</button>
+					<button type="button" class="person-video-btn"
+							data-file="video3_senior_panasonic.mp4"
+							title="Senior Panasonic">
+						<video muted playsinline preload="none"></video>
+						<span class="pv-caption">Panasonic</span>
+					</button>
+				</div>
+				<div class="slider-row" style="margin-top:12px;">
+					<label>Video size</label>
+					<input type="range" id="person-video-scale" min="4" max="40" value="7" step="1"
+						   title="Scale only the chroma-key video billboard">
+					<span id="person-video-scale-val">0.7×</span>
+				</div>
+			</div>
+
+			<div class="slider-row" id="model-scale-row">
+				<label>Zoom</label>
+				<input type="range" id="model-scale" min="5" max="40" value="21" step="1"
+					   title="Move camera closer or farther along your current view">
+				<span id="model-scale-val">2.1×</span>
+			</div>
+
+			<div id="walk-controls">
+				<div class="toggle-row">
+					<div class="toggle-label">
+						<span>Walk Path</span>
+						<small>Loop along curve</small>
+					</div>
+					<label class="toggle">
+						<input type="checkbox" id="walk-toggle">
+						<div class="toggle-track"></div>
+					</label>
+				</div>
+				<div class="slider-row">
+					<label>Speed</label>
+					<input type="range" id="walk-speed" min="1" max="20" value="5" step="1">
+					<span id="walk-speed-val">5</span>
+				</div>
+				<div id="path-hint">
+					▸ Click scene → F12 console<br>
+					&nbsp;&nbsp;to log path coordinates
+				</div>
+
+				<div class="audio-row">
+					<button class="audio-play-btn" id="audio-btn" title="Play / Stop audio">▶</button>
+					<div class="audio-info">
+						<div class="audio-name">Cetățile Dacice</div>
+						<div class="audio-status" id="audio-status">STOPPED</div>
+					</div>
+					<input type="range" id="audio-vol" min="0" max="100" value="70" title="Volume">
+				</div>
+			</div>
+		</div>
+
+		<div id="status">
+			<span class="dot"></span>
+			<span id="status-text">SELECT A MODEL</span>
+		</div>
+	</div>
+
+	<!-- Transparent overlay canvas — chroma video + GLB models float on top of point cloud -->
+	<div id="overlay-canvas-wrap"></div>
+
+	<!-- Loading overlay (for GLB / video loads, not point cloud) -->
+	<div id="loader-overlay">
+		<div class="loader-inner">
+			<div class="loader-ring"></div>
+			<div class="loader-text">LOADING</div>
+		</div>
+	</div>
+
+	<!-- Bottom-left model name display -->
+	<div id="model-name-overlay"></div>
+
+	<!-- ─────────── POTREE INIT (kept intact) ─────────── -->
+	<script type="module">
+
+		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+
+		viewer.setEDLEnabled(false);
+		viewer.setFOV(60);
+		viewer.setPointBudget(1_000_000);
+		viewer.loadSettingsFromURL();
+		viewer.setBackground("skybox");
+
+		viewer.setDescription("Point cloud courtesy of <a target='_blank' href='https://www.sigeom.ch/'>sigeom sa</a>");
+
+		viewer.loadGUI(() => {
+			viewer.setLanguage('en');
+			$("#menu_tools").next().show();
+			$("#menu_clipping").next().show();
+			// Sidebar is hidden via CSS — no need to toggle it on
+		});
+
+		// Load and add point cloud to scene
+		Potree.loadPointCloud("../pointclouds/vol_total/cloud.js", "sigeom.sa", e => {
+			let scene = viewer.scene;
+			let pointcloud = e.pointcloud;
+
+			let material = pointcloud.material;
+			material.size = 1;
+			material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+			material.shape = Potree.PointShape.SQUARE;
+
+			scene.addPointCloud(pointcloud);
+
+			viewer.fitToScreen();
+			window.dispatchEvent(new CustomEvent('potree:pointcloud-ready', { detail: { pointcloud } }));
+		});
+
+	</script>
+
+
+	<!-- ─────────── OVERLAY: Chroma video + GLB models on top of Potree ─────────── -->
+	<script type="importmap">
+	{
+		"imports": {
+			"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+			"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+		}
+	}
+	</script>
+
+	<script type="module">
+	import * as THREE from 'three';
+	import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+	/** Resolve ./models/... against this HTML URL */
+	function resolveHref(relPath) {
+		try { return new URL(relPath, import.meta.url).href; }
+		catch (_) { return relPath; }
+	}
+
+	// ── Wait for Potree viewer to be ready ─────────────────────
+	function whenViewerReady(cb) {
+		const ok = () => window.viewer
+			&& window.viewer.scene
+			&& typeof window.viewer.scene.getActiveCamera === 'function'
+			&& window.viewer.scene.getActiveCamera();
+		if (ok()) { cb(); return; }
+		const t = setInterval(() => { if (ok()) { clearInterval(t); cb(); } }, 60);
+	}
+
+	whenViewerReady(initOverlay);
+
+	function initOverlay() {
+
+	// ── OVERLAY SCENE ──────────────────────────────────────────
+	const wrap = document.getElementById('overlay-canvas-wrap');
+	const overlayScene = new THREE.Scene();
+	overlayScene.background = null;
+
+	const overlayCamera = new THREE.PerspectiveCamera(
+		60,
+		wrap.clientWidth / Math.max(1, wrap.clientHeight),
+		0.01, 100000
+	);
+
+	const overlayRenderer = new THREE.WebGLRenderer({
+		alpha: true,
+		antialias: true,
+		powerPreference: 'high-performance'
+	});
+	THREE.ColorManagement.enabled = true;
+	overlayRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+	overlayRenderer.setSize(wrap.clientWidth, wrap.clientHeight);
+	overlayRenderer.setClearColor(0x000000, 0);
+	overlayRenderer.outputColorSpace = THREE.SRGBColorSpace;
+	overlayRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+	overlayRenderer.toneMappingExposure = 1.2;
+	wrap.appendChild(overlayRenderer.domElement);
+
+	// Lighting (only affects overlay GLB models, not the point cloud)
+	overlayScene.add(new THREE.AmbientLight(0xffffff, 0.6));
+	const key = new THREE.DirectionalLight(0xffffff, 2.5);
+	key.position.set(5, 8, 5);
+	overlayScene.add(key);
+	const fill = new THREE.DirectionalLight(0x88aaff, 0.8);
+	fill.position.set(-5, 2, -3);
+	overlayScene.add(fill);
+	const rim = new THREE.DirectionalLight(0x00c8ff, 0.4);
+	rim.position.set(0, -3, -5);
+	overlayScene.add(rim);
+
+	// ── DOM REFS ───────────────────────────────────────────────
+	const loaderOverlay  = document.getElementById('loader-overlay');
+	const statusEl       = document.getElementById('status');
+	const statusText     = document.getElementById('status-text');
+	const nameOverlay    = document.getElementById('model-name-overlay');
+	const rotateToggle   = document.getElementById('rotate-toggle');
+	const walkControlsEl = document.getElementById('walk-controls');
+	const walkToggle     = document.getElementById('walk-toggle');
+	const walkSpeedInput = document.getElementById('walk-speed');
+	const walkSpeedVal   = document.getElementById('walk-speed-val');
+	const modelScaleInput = document.getElementById('model-scale');
+	const modelScaleVal   = document.getElementById('model-scale-val');
+	const personVideoPanelEl    = document.getElementById('person-video-panel');
+	const personChromaPanelEl   = document.getElementById('person-chroma-panel');
+	const personVideoButtonsRoot = document.getElementById('person-video-buttons');
+	const chromaModeButtonsRoot  = document.getElementById('chroma-mode-buttons');
+	const personVideoScaleInput  = document.getElementById('person-video-scale');
+	const personVideoScaleVal    = document.getElementById('person-video-scale-val');
+	const audioBtn      = document.getElementById('audio-btn');
+	const audioStatusEl = document.getElementById('audio-status');
+	const audioVolInput = document.getElementById('audio-vol');
+
+	// ── STATE ──────────────────────────────────────────────────
+	let currentModel = null;
+	let currentType  = null;
+	let autoRotate   = false;
+	let isLoading    = false;
+
+	let personGroup  = null;
+	let personMesh   = null;
+	let videoEl      = null;
+	let videoTex     = null;
+	let walkProgress = 0;
+	let walkActive   = false;
+	let personLoadGen = 0;
+
+	/** World-space anchor for the walk path / model placement (Potree pivot). */
+	const walkOriginOffset = new THREE.Vector3();
+	/** Walk path radius is multiplied so it scales with the point cloud size. */
+	let walkPathScale = 1;
+	/** Auto-computed scene size hint (used for picking initial model scale). */
+	let sceneSizeHint = 1;
+
+	let selectedPersonVideoFile = 'video1_green_animation_senior.mp4';
+	let personPreviewVideosStarted = false;
+	let selectedChromaMode = 'decoded';
+
+	const DEFAULT_CHROMA_BY_VIDEO = {
+		'video1_green_animation_senior.mp4': 'decoded',
+		'video2_man_sword.mp4': 'bright',
+		'video3_senior_panasonic.mp4': 'native'
+	};
+
+	function syncDefaultChromaForSelectedVideo() {
+		const mode = DEFAULT_CHROMA_BY_VIDEO[selectedPersonVideoFile];
+		if (mode) selectedChromaMode = mode;
+	}
+
+	const PLANE_CLEARANCE = 0.05;
+
+	/** Compute a sensible world-space anchor + scale based on point cloud bounding box. */
+	function syncSceneAnchor() {
+		const v = window.viewer;
+		try {
+			const pivot = v.scene.view.getPivot();
+			if (pivot) walkOriginOffset.copy(pivot);
+		} catch (_) { /* ignore */ }
+
+		// Estimate scene size from point cloud bounding box
+		try {
+			const pcs = v.scene.pointclouds;
+			if (pcs && pcs.length) {
+				const box = new THREE.Box3();
+				for (const pc of pcs) {
+					const b = pc.getBoundingBoxWorld
+						? pc.getBoundingBoxWorld()
+						: pc.boundingBox;
+					if (b) box.union(b);
+				}
+				if (!box.isEmpty()) {
+					const sz = box.getSize(new THREE.Vector3());
+					sceneSizeHint = Math.max(sz.x, sz.y, sz.z) || 1;
+					walkPathScale = Math.max(1, sceneSizeHint * 0.04);
+				}
+			}
+		} catch (_) { /* ignore */ }
+	}
+
+	window.addEventListener('potree:pointcloud-ready', syncSceneAnchor);
+
+	function placeRootOnFloor(root, uniformScale) {
+		root.scale.setScalar(uniformScale);
+		root.position.set(0, 0, 0);
+		root.rotation.set(0, 0, 0);
+		root.updateMatrixWorld(true);
+		const box = new THREE.Box3().setFromObject(root);
+		const c = box.getCenter(new THREE.Vector3());
+		root.position.set(-c.x, -box.min.y + PLANE_CLEARANCE, -c.z);
+		root.updateMatrixWorld(true);
+	}
+
+	function setPersonChromaPanelVisible(show) {
+		if (!personChromaPanelEl) return;
+		personChromaPanelEl.classList.toggle('visible', !!show);
+	}
+
+	function syncPersonVideoScaleFromUI() {
+		if (!personVideoScaleInput || !personVideoScaleVal) return;
+		const s = parseFloat(personVideoScaleInput.value) / 10;
+		personVideoScaleVal.textContent = s.toFixed(1) + '×';
+		if (personGroup) {
+			const worldScale = s * Math.max(1, sceneSizeHint * 0.012);
+			personGroup.scale.setScalar(worldScale);
+		}
+	}
+
+	function getPersonVideoPath() {
+		return resolveHref('./models/' + selectedPersonVideoFile);
+	}
+
+	function markPersonVideoActiveButton() {
+		personVideoButtonsRoot.querySelectorAll('.person-video-btn').forEach(btn => {
+			btn.classList.toggle('active', btn.dataset.file === selectedPersonVideoFile);
+		});
+	}
+
+	function markChromaModeButtons() {
+		if (!chromaModeButtonsRoot) return;
+		chromaModeButtonsRoot.querySelectorAll('.chroma-mode-btn').forEach(btn => {
+			btn.classList.toggle('active', btn.dataset.chroma === selectedChromaMode);
+		});
+	}
+
+	function reloadActivePerson() {
+		const mdl = document.querySelector('.model-btn.active');
+		if (!mdl || isLoading) return;
+		if (mdl.dataset.type === 'person') {
+			loadPerson(mdl.dataset.name, null);
+		} else if (mdl.dataset.type === 'person-m1') {
+			loadPerson(mdl.dataset.name, mdl.dataset.model);
+		}
+	}
+
+	function setPersonVideoPanelVisible(show) {
+		if (!personVideoPanelEl) return;
+		personVideoPanelEl.classList.toggle('visible', !!show);
+		if (show && !personPreviewVideosStarted) {
+			personPreviewVideosStarted = true;
+			setupPersonVideoPreviewThumbs();
+		}
+	}
+
+	function setupPersonVideoPreviewThumbs() {
+		personVideoButtonsRoot.querySelectorAll('.person-video-btn').forEach(btn => {
+			const vid = btn.querySelector('video');
+			if (!vid || !btn.dataset.file) return;
+			vid.src = resolveHref('./models/' + btn.dataset.file);
+
+			const grabFrame = () => {
+				try {
+					const d = vid.duration;
+					const t = d && Number.isFinite(d)
+						? Math.min(0.2, Math.max(0.05, d * 0.02))
+						: 0.1;
+					vid.currentTime = t;
+				} catch (_) { vid.currentTime = 0; }
+			};
+
+			vid.addEventListener('loadedmetadata', grabFrame, { once: true });
+			vid.addEventListener('seeked', () => { vid.pause(); }, { once: true });
+			vid.load();
+		});
+	}
+
+	// ── AUDIO ──────────────────────────────────────────────────
+	const audioEl    = new Audio(resolveHref('./models/audio1-cetatile-dacice.mp3'));
+	audioEl.loop     = true;
+	audioEl.volume   = 0.70;
+	let audioPlaying = false;
+	let walkRatePerSecond = 0.03;
+
+	function findClosestCurveT(curve, target, samples = 720) {
+		let bestT = 0;
+		let bestD = Infinity;
+		const tmp = new THREE.Vector3();
+		for (let i = 0; i <= samples; i++) {
+			const t = i / samples;
+			curve.getPointAt(t, tmp);
+			const d = tmp.distanceToSquared(target);
+			if (d < bestD) { bestD = d; bestT = t; }
+		}
+		return bestT;
+	}
+
+	// ── WALKING PATH ───────────────────────────────────────────
+	const walkPathAnchor = new THREE.Vector3(-4, 0, 0);
+	const walkPath = new THREE.CatmullRomCurve3([
+		new THREE.Vector3(-4,    0,  0),
+		new THREE.Vector3(-2.5,  0,  2.5),
+		new THREE.Vector3( 0,    0,  4),
+		new THREE.Vector3( 2.5,  0,  2.5),
+		new THREE.Vector3( 4,    0,  0),
+		new THREE.Vector3( 2.5,  0, -2.5),
+		new THREE.Vector3( 0,    0, -4),
+		new THREE.Vector3(-2.5,  0, -2.5),
+	], true, 'centripetal');
+	const WALK_START_T = findClosestCurveT(walkPath, walkPathAnchor);
+
+	const gltfLoader = new GLTFLoader();
+
+	// ── CHROMA KEY MATERIAL (verbatim from tur.html) ──────────
+	function injectMeshBasicChroma(shader, chromaMapFrag) {
+		shader.fragmentShader = shader.fragmentShader.replace(
+			'#include <common>',
+			`#include <common>
+uniform float threshold;
+uniform float smoothing;`
+		);
+		shader.fragmentShader = shader.fragmentShader.replace(/^[ \t]*#include <map_fragment>/m, chromaMapFrag);
+	}
+
+	function makeChromaMaterialDecoded(tex) {
+		const KEY_THRESH = 0.30;
+		const KEY_SMOOTH = 0.12;
+
+		const mat = new THREE.MeshBasicMaterial({
+			map: tex,
+			transparent: true,
+			side: THREE.DoubleSide,
+			depthWrite: false,
+			toneMapped: false,
+			opacity: 1,
+			alphaTest: 0.05
+		});
+
+		mat.customProgramCacheKey = () => 'eyemap_chroma_decoded';
+
+		mat.onBeforeCompile = (shader) => {
+			shader.uniforms.threshold = { value: KEY_THRESH };
+			shader.uniforms.smoothing = { value: KEY_SMOOTH };
+
+			const chromaMapFrag = `#ifdef USE_MAP
+
+	vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+
+	#ifdef DECODE_VIDEO_TEXTURE
+
+		sampledDiffuseColor = vec4( mix( pow( sampledDiffuseColor.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), sampledDiffuseColor.rgb * 0.0773993808, vec3( lessThanEqual( sampledDiffuseColor.rgb, vec3( 0.04045 ) ) ) ), sampledDiffuseColor.w );
+
+	#endif
+
+	vec3 srgb = sampledDiffuseColor.rgb;
+	vec3 lin = pow(max(srgb, vec3(0.0)), vec3(2.2));
+	float eps = 0.001;
+	float greenRatio = lin.g / (lin.r + lin.g + lin.b + eps);
+	float luminance = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+	float darkMask = smoothstep(0.01, 0.08, luminance);
+	float key = smoothstep(threshold - smoothing, threshold + smoothing, greenRatio);
+	float alphaKey = 1.0 - key * darkMask;
+	vec3 col = sampledDiffuseColor.rgb;
+	float spillAmount = key * darkMask;
+	col.g = mix(col.g, (col.r + col.b) * 0.5, spillAmount);
+
+	diffuseColor.rgb *= col;
+	diffuseColor.a *= alphaKey;
+
+#endif`;
+
+			injectMeshBasicChroma(shader, chromaMapFrag);
+		};
+
+		return mat;
+	}
+
+	function makeChromaMaterialBright(tex) {
+		return new THREE.ShaderMaterial({
+			glslVersion: THREE.GLSL3,
+			uniforms: {
+				tex:       { value: tex },
+				threshold: { value: 0.30 },
+				smoothing: { value: 0.12 }
+			},
+			vertexShader: `
+				out vec2 vUv;
+				void main() {
+					vUv = uv;
+					gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+				}
+			`,
+			fragmentShader: `
+				precision highp float;
+				precision highp sampler2D;
+
+				uniform sampler2D tex;
+				uniform float threshold;
+				uniform float smoothing;
+				in vec2 vUv;
+				out vec4 fragColor;
+
+				vec3 toLinear(vec3 c) {
+					return pow(max(c, vec3(0.0)), vec3(2.2));
+				}
+
+				void main() {
+					vec4 s = texture(tex, vUv);
+					vec3 lin = toLinear(s.rgb);
+
+					float eps = 0.001;
+					float greenRatio = lin.g / (lin.r + lin.g + lin.b + eps);
+
+					float luminance = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+					float darkMask  = smoothstep(0.01, 0.08, luminance);
+
+					float key   = smoothstep(threshold - smoothing,
+											 threshold + smoothing,
+											 greenRatio);
+					float alpha = 1.0 - key * darkMask;
+
+					if (alpha < 0.05) discard;
+
+					vec3 col = s.rgb;
+					float spillAmount = key * darkMask;
+					col.g = mix(col.g, (col.r + col.b) * 0.5, spillAmount);
+					col = min(col * 1.18 + vec3(0.06), vec3(1.0));
+
+					fragColor = vec4(col, alpha);
+				}
+			`,
+			transparent: true,
+			side: THREE.DoubleSide,
+			depthWrite: false,
+			toneMapped: false
+		});
+	}
+
+	function makeChromaMaterialNative(tex) {
+		return new THREE.ShaderMaterial({
+			glslVersion: THREE.GLSL3,
+			uniforms: {
+				tex:       { value: tex },
+				threshold: { value: 0.30 },
+				smoothing: { value: 0.12 }
+			},
+			vertexShader: `
+				out vec2 vUv;
+				void main() {
+					vUv = uv;
+					gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+				}
+			`,
+			fragmentShader: `
+				precision highp float;
+				precision highp sampler2D;
+
+				uniform sampler2D tex;
+				uniform float threshold;
+				uniform float smoothing;
+				in vec2 vUv;
+				out vec4 fragColor;
+
+				vec3 toLinear(vec3 c) {
+					return pow(max(c, vec3(0.0)), vec3(2.2));
+				}
+
+				void main() {
+					vec4 s = texture(tex, vUv);
+					vec3 lin = toLinear(s.rgb);
+
+					float eps = 0.001;
+					float greenRatio = lin.g / (lin.r + lin.g + lin.b + eps);
+
+					float luminance = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+					float darkMask  = smoothstep(0.01, 0.08, luminance);
+
+					float key   = smoothstep(threshold - smoothing,
+											 threshold + smoothing,
+											 greenRatio);
+					float alpha = 1.0 - key * darkMask;
+
+					if (alpha < 0.05) discard;
+
+					vec3 col = s.rgb;
+					float spillAmount = key * darkMask;
+					col.g = mix(col.g, (col.r + col.b) * 0.5, spillAmount);
+
+					fragColor = vec4(col, alpha);
+				}
+			`,
+			transparent: true,
+			side: THREE.DoubleSide,
+			depthWrite: false,
+			toneMapped: false
+		});
+	}
+
+	function makeChromaMaterial(tex, mode) {
+		switch (mode) {
+			case 'decoded': return makeChromaMaterialDecoded(tex);
+			case 'bright':  return makeChromaMaterialBright(tex);
+			case 'native':  return makeChromaMaterialNative(tex);
+			default:        return makeChromaMaterialDecoded(tex);
+		}
+	}
+
+	// ── LOAD PERSON ────────────────────────────────────────────
+	function loadPerson(displayName, extraModelPath) {
+		const videoPath = getPersonVideoPath();
+		const myGen = ++personLoadGen;
+		isLoading = true;
+		clearScene();
+		walkControlsEl.classList.remove('visible');
+		setPersonVideoPanelVisible(false);
+		setPersonChromaPanelVisible(false);
+		loaderOverlay.classList.add('visible');
+		setStatus('loading', 'LOADING VIDEO...');
+
+		// Re-sync anchor each load (point cloud may have just finished loading)
+		syncSceneAnchor();
+
+		videoEl = document.createElement('video');
+		videoEl.src         = videoPath;
+		videoEl.loop        = true;
+		videoEl.muted       = true;
+		videoEl.playsInline = true;
+		videoEl.crossOrigin = 'anonymous';
+
+		videoEl.addEventListener('canplay', () => {
+			if (myGen !== personLoadGen) return;
+
+			videoEl.play().catch(() => {});
+
+			videoTex = new THREE.VideoTexture(videoEl);
+			videoTex.minFilter  = THREE.LinearFilter;
+			videoTex.magFilter  = THREE.LinearFilter;
+			videoTex.format     = THREE.RGBAFormat;
+			videoTex.colorSpace = THREE.SRGBColorSpace;
+
+			const aspect = (videoEl.videoHeight || 1080) / (videoEl.videoWidth || 1920);
+			const planeH = 2.0;
+			const planeW = planeH / aspect;
+
+			const geo = new THREE.PlaneGeometry(planeW, planeH);
+			const mat = makeChromaMaterial(videoTex, selectedChromaMode);
+			personMesh = new THREE.Mesh(geo, mat);
+			personMesh.userData.isPersonVideoPlane = true;
+			personMesh.position.y = planeH / 2 + PLANE_CLEARANCE;
+
+			personGroup = new THREE.Group();
+			personGroup.add(personMesh);
+			overlayScene.add(personGroup);
+
+			currentModel = personGroup;
+			currentType  = 'person';
+			walkProgress = WALK_START_T;
+			syncPersonVideoScaleFromUI();
+			placePersonOnPath();
+
+			if (extraModelPath) {
+				gltfLoader.load(resolveHref(extraModelPath), (gltf) => {
+					if (myGen !== personLoadGen) return;
+					const m = gltf.scene;
+					const box = new THREE.Box3().setFromObject(m);
+					const sz  = box.getSize(new THREE.Vector3());
+					const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
+					const sc  = targetSize / Math.max(sz.x, sz.y, sz.z);
+					placeRootOnFloor(m, sc);
+					m.position.add(walkOriginOffset);
+					m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+					m.userData.isCompanionModel = true;
+					overlayScene.add(m);
+				}, undefined, (err) => console.warn('Companion model failed:', err));
+			}
+
+			walkControlsEl.classList.add('visible');
+			setPersonVideoPanelVisible(true);
+			setPersonChromaPanelVisible(true);
+			loaderOverlay.classList.remove('visible');
+			setStatus('ready', (displayName || 'PERSOANA').toUpperCase());
+			nameOverlay.textContent = displayName || 'Persoana';
+			isLoading = false;
+		}, { once: true });
+
+		videoEl.addEventListener('error', () => {
+			if (myGen !== personLoadGen) return;
+			loaderOverlay.classList.remove('visible');
+			setStatus('error', 'VIDEO LOAD FAILED');
+			isLoading = false;
+		}, { once: true });
+
+		videoEl.load();
+	}
+
+	function placePersonOnPath() {
+		if (!personGroup) return;
+		const tmp = new THREE.Vector3();
+		walkPath.getPointAt(walkProgress, tmp);
+		tmp.multiplyScalar(walkPathScale).add(walkOriginOffset);
+		personGroup.position.copy(tmp);
+	}
+
+	// ── LOAD GLB ───────────────────────────────────────────────
+	function loadModel(path, name) {
+		if (isLoading) return;
+		isLoading = true;
+		clearScene();
+		walkControlsEl.classList.remove('visible');
+		setPersonVideoPanelVisible(false);
+		setPersonChromaPanelVisible(false);
+		loaderOverlay.classList.add('visible');
+		setStatus('loading', 'LOADING...');
+
+		syncSceneAnchor();
+
+		gltfLoader.load(resolveHref(path), (gltf) => {
+			const model  = gltf.scene;
+			const box    = new THREE.Box3().setFromObject(model);
+			const size   = box.getSize(new THREE.Vector3());
+			const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
+			const normScale  = targetSize / Math.max(size.x, size.y, size.z);
+
+			placeRootOnFloor(model, normScale);
+			model.position.add(walkOriginOffset);
+
+			model.traverse(o => {
+				if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+			});
+
+			overlayScene.add(model);
+			currentModel = model;
+			currentType  = 'model';
+
+			loaderOverlay.classList.remove('visible');
+			setStatus('ready', name.toUpperCase());
+			nameOverlay.textContent = name;
+			isLoading = false;
+		}, undefined, (err) => {
+			console.error(err);
+			loaderOverlay.classList.remove('visible');
+			setStatus('error', 'LOAD FAILED');
+			isLoading = false;
+		});
+	}
+
+	// ── CLEAR SCENE ────────────────────────────────────────────
+	function clearScene() {
+		const companions = [];
+		overlayScene.traverse(obj => { if (obj.userData.isCompanionModel) companions.push(obj); });
+		companions.forEach(obj => {
+			overlayScene.remove(obj);
+			obj.traverse(c => {
+				if (c.geometry) c.geometry.dispose();
+				if (c.material) [].concat(c.material).forEach(m => m.dispose());
+			});
+		});
+
+		if (currentModel) {
+			overlayScene.remove(currentModel);
+			currentModel.traverse(obj => {
+				if (obj.geometry) obj.geometry.dispose();
+				if (obj.material) {
+					[].concat(obj.material).forEach(m => {
+						if (m.uniforms?.tex?.value) {
+							const tex = m.uniforms.tex.value;
+							m.uniforms.tex.value = null;
+							if (tex && typeof tex.dispose === 'function') tex.dispose();
+						}
+						if (m.map) {
+							const tm = m.map;
+							m.map = null;
+							if (tm && typeof tm.dispose === 'function') tm.dispose();
+						}
+						m.dispose();
+					});
+				}
+			});
+			currentModel = null;
+		}
+		videoTex = null;
+		if (videoEl) {
+			videoEl.pause();
+			try { videoEl.removeAttribute('src'); videoEl.load(); } catch (_) {}
+			videoEl = null;
+		}
+		personGroup = null;
+		personMesh  = null;
+		currentType = null;
+
+		stopAudio();
+	}
+
+	// ── SIDEBAR BUTTONS ────────────────────────────────────────
+	document.querySelectorAll('.model-btn').forEach(btn => {
+		btn.addEventListener('click', () => {
+			if (btn.classList.contains('active') || isLoading) return;
+			document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+			btn.classList.add('active');
+
+			if (btn.dataset.type === 'person') {
+				loadPerson(btn.dataset.name, null);
+			} else if (btn.dataset.type === 'person-m1') {
+				loadPerson(btn.dataset.name, btn.dataset.model);
+			} else {
+				loadModel(btn.dataset.path, btn.dataset.name);
+			}
+		});
+	});
+
+	// ── CONTROLS ───────────────────────────────────────────────
+	rotateToggle.addEventListener('change', () => { autoRotate = rotateToggle.checked; });
+	walkToggle.addEventListener('change',   () => { walkActive  = walkToggle.checked; });
+
+	function applyZoomFromSlider() {
+		const zoomMul = Math.max(0.35, parseFloat(modelScaleInput.value) / 10);
+		modelScaleVal.textContent = zoomMul.toFixed(1) + '×';
+		// Move Potree's camera along its current view direction (mirrors tur.html zoom behavior)
+		try {
+			const view  = window.viewer.scene.view;
+			const pivot = view.getPivot();
+			if (!pivot) return;
+			const camPos = view.position.clone();
+			const dir    = camPos.clone().sub(pivot);
+			const baseDist = (sceneSizeHint || 1) * 1.2;
+			const dist = baseDist / zoomMul;
+			if (dir.lengthSq() < 1e-6) dir.set(0.25, 0.2, 1);
+			dir.normalize().multiplyScalar(dist);
+			view.position.copy(pivot.clone().add(dir));
+		} catch (_) {}
+	}
+	modelScaleInput.addEventListener('input', applyZoomFromSlider);
+
+	if (personVideoScaleInput) {
+		personVideoScaleInput.addEventListener('input', syncPersonVideoScaleFromUI);
+	}
+
+	personVideoButtonsRoot.querySelectorAll('.person-video-btn').forEach(pvBtn => {
+		pvBtn.addEventListener('click', () => {
+			if (pvBtn.classList.contains('active')) return;
+			selectedPersonVideoFile = pvBtn.dataset.file;
+			syncDefaultChromaForSelectedVideo();
+			markPersonVideoActiveButton();
+			markChromaModeButtons();
+
+			const mdl = document.querySelector('.model-btn.active');
+			if (!mdl) return;
+			if (mdl.dataset.type === 'person') {
+				loadPerson(mdl.dataset.name, null);
+			} else if (mdl.dataset.type === 'person-m1') {
+				loadPerson(mdl.dataset.name, mdl.dataset.model);
+			}
+		});
+	});
+
+	syncDefaultChromaForSelectedVideo();
+	markPersonVideoActiveButton();
+	markChromaModeButtons();
+
+	if (chromaModeButtonsRoot) {
+		chromaModeButtonsRoot.querySelectorAll('.chroma-mode-btn').forEach(cmBtn => {
+			cmBtn.addEventListener('click', () => {
+				if (cmBtn.classList.contains('active')) return;
+				selectedChromaMode = cmBtn.dataset.chroma;
+				markChromaModeButtons();
+				reloadActivePerson();
+			});
+		});
+	}
+
+	function updateWalkRateFromSlider() {
+		walkRatePerSecond = parseFloat(walkSpeedInput.value) * 0.006;
+		walkSpeedVal.textContent = walkSpeedInput.value;
+	}
+	walkSpeedInput.addEventListener('input', updateWalkRateFromSlider);
+	updateWalkRateFromSlider();
+
+	// ── AUDIO ──────────────────────────────────────────────────
+	function stopAudio() {
+		audioEl.pause();
+		audioEl.currentTime = 0;
+		audioPlaying = false;
+		audioBtn.textContent = '▶';
+		audioBtn.classList.remove('playing');
+		audioStatusEl.textContent = 'STOPPED';
+		audioStatusEl.classList.remove('active');
+	}
+
+	audioBtn.addEventListener('click', () => {
+		if (audioPlaying) {
+			stopAudio();
+		} else {
+			audioEl.play().then(() => {
+				audioPlaying = true;
+				audioBtn.textContent = '⏹';
+				audioBtn.classList.add('playing');
+				audioStatusEl.textContent = 'PLAYING';
+				audioStatusEl.classList.add('active');
+			}).catch(err => {
+				console.warn('Audio play failed:', err);
+				audioStatusEl.textContent = 'ERROR';
+			});
+		}
+	});
+
+	audioVolInput.addEventListener('input', () => {
+		audioEl.volume = parseFloat(audioVolInput.value) / 100;
+	});
+
+	// ── ANIMATION LOOP ─────────────────────────────────────────
+	const clock = new THREE.Clock();
+
+	function syncCameraFromPotree() {
+		try {
+			const pCam = window.viewer.scene.getActiveCamera();
+			if (!pCam) return;
+			overlayCamera.position.copy(pCam.position);
+			overlayCamera.quaternion.copy(pCam.quaternion);
+			overlayCamera.fov    = pCam.fov || overlayCamera.fov;
+			overlayCamera.aspect = pCam.aspect || overlayCamera.aspect;
+			overlayCamera.near   = pCam.near || overlayCamera.near;
+			overlayCamera.far    = pCam.far  || overlayCamera.far;
+			overlayCamera.updateProjectionMatrix();
+		} catch (_) {}
+	}
+
+	function animate() {
+		requestAnimationFrame(animate);
+		const delta = clock.getDelta();
+
+		syncCameraFromPotree();
+
+		if (currentType === 'model' && autoRotate && currentModel) {
+			currentModel.rotation.y += delta * 0.4;
+		}
+
+		if (currentType === 'person' && personGroup && personMesh) {
+			if (videoTex) videoTex.needsUpdate = true;
+
+			if (walkActive) {
+				walkProgress = ((walkProgress + walkRatePerSecond * delta) % 1 + 1) % 1;
+			}
+
+			placePersonOnPath();
+
+			// Billboard — face camera, stay upright on Y
+			const dir = new THREE.Vector3()
+				.subVectors(overlayCamera.position, personGroup.position);
+			dir.y = 0;
+			if (dir.lengthSq() > 0.0001) {
+				personGroup.rotation.y = Math.atan2(dir.x, dir.z);
+			}
+		}
+
+		overlayRenderer.render(overlayScene, overlayCamera);
+	}
+	animate();
+
+	// ── RESIZE ─────────────────────────────────────────────────
+	function resizeOverlay() {
+		const w = wrap.clientWidth, h = wrap.clientHeight;
+		overlayCamera.aspect = w / Math.max(1, h);
+		overlayCamera.updateProjectionMatrix();
+		overlayRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+		overlayRenderer.setSize(w, h);
+	}
+	window.addEventListener('resize', resizeOverlay);
+
+	// Click-to-log path helper (works because canvas-wrap has pointer-events:none,
+	// the click hits Potree which still bubbles up to window)
+	window.addEventListener('click', () => {
+		if (currentType === 'person') {
+			const p = overlayCamera.position;
+			console.log(
+				`%c[PATH POINT]  new THREE.Vector3(${p.x.toFixed(2)}, 0, ${p.z.toFixed(2)}),`,
+				'color:#a855f7;font-weight:bold'
+			);
+		}
+	});
+
+	function setStatus(type, text) {
+		statusEl.className     = type;
+		statusText.textContent = text;
+	}
+
+	setStatus('ready', 'POINT CLOUD READY');
+
+	} /* end initOverlay */
+	</script>
+
+
+  </body>
+</html>
