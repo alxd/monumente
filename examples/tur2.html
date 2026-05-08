@@ -640,7 +640,7 @@
 
 	<!-- Potree container is kept intact (its sidebar is hidden via CSS above) -->
 	<div class="potree_container" style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px; ">
-		<div id="potree_render_area" style="background-image: url('../build/potree/resources/images/background.jpg');"></div>
+		<div id="potree_render_area" style="background: #000;"></div>
 		<div id="potree_sidebar_container"> </div>
 	</div>
 
@@ -798,7 +798,7 @@
 		viewer.setFOV(60);
 		viewer.setPointBudget(1_000_000);
 		viewer.loadSettingsFromURL();
-		viewer.setBackground("skybox");
+		viewer.setBackground("black");
 
 		viewer.setDescription("Point cloud courtesy of <a target='_blank' href='https://www.sigeom.ch/'>sigeom sa</a>");
 
@@ -899,15 +899,38 @@
 		return new THREE.Vector3(worldPos.x, worldPos.z, -worldPos.y);
 	}
 
-	// Lighting (only affects overlay GLB models, not the point cloud)
-	overlayRoot.add(new THREE.AmbientLight(0xffffff, 0.6));
+	/** Hide every Potree point cloud so the overlay model stands alone on a black background. */
+	function hidePotreePointclouds() {
+		try {
+			const pcs = window.viewer.scene.pointclouds;
+			if (pcs && pcs.length) pcs.forEach(pc => { pc.visible = false; });
+		} catch (_) {}
+	}
+
+	/** Show every Potree point cloud again (used for testing / future "back to cloud" button). */
+	function showPotreePointclouds() {
+		try {
+			const pcs = window.viewer.scene.pointclouds;
+			if (pcs && pcs.length) pcs.forEach(pc => { pc.visible = true; });
+		} catch (_) {}
+	}
+
+	// Disable THREE.Cache so a re-clicked GLB always re-decodes its textures fresh,
+	// instead of returning stale handles to textures we already disposed.
+	THREE.Cache.enabled = false;
+
+	// Lighting (only affects overlay GLB models, not the point cloud).
+	// PBR MeshStandardMaterial needs decent ambient fill or it renders nearly black
+	// (no envMap is provided here), so we use a strong ambient + hemisphere combo.
+	overlayRoot.add(new THREE.AmbientLight(0xffffff, 1.4));
+	overlayRoot.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
 	const key = new THREE.DirectionalLight(0xffffff, 2.5);
 	key.position.set(5, 8, 5);
 	overlayRoot.add(key);
-	const fill = new THREE.DirectionalLight(0x88aaff, 0.8);
+	const fill = new THREE.DirectionalLight(0xb0c8ff, 1.0);
 	fill.position.set(-5, 2, -3);
 	overlayRoot.add(fill);
-	const rim = new THREE.DirectionalLight(0x00c8ff, 0.4);
+	const rim = new THREE.DirectionalLight(0xffe0b0, 0.6);
 	rim.position.set(0, -3, -5);
 	overlayRoot.add(rim);
 
@@ -1321,14 +1344,15 @@ uniform float smoothing;`
 		const myGen = ++personLoadGen;
 		isLoading = true;
 		clearScene();
+		// Re-sync anchor BEFORE hiding the point cloud — getPivot()/bbox math
+		// works even on hidden clouds, but keep ordering predictable.
+		syncSceneAnchor();
+		hidePotreePointclouds();
 		walkControlsEl.classList.remove('visible');
 		setPersonVideoPanelVisible(false);
 		setPersonChromaPanelVisible(false);
 		loaderOverlay.classList.add('visible');
 		setStatus('loading', 'LOADING VIDEO...');
-
-		// Re-sync anchor each load (point cloud may have just finished loading)
-		syncSceneAnchor();
 
 		videoEl = document.createElement('video');
 		videoEl.src         = videoPath;
@@ -1378,7 +1402,6 @@ uniform float smoothing;`
 					const sc  = targetSize / Math.max(sz.x, sz.y, sz.z);
 					placeRootOnFloor(m, sc);
 					m.position.add(worldToOverlayLocal(walkOriginOffset));
-					m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 					m.userData.isCompanionModel = true;
 					overlayRoot.add(m);
 				}, undefined, (err) => console.warn('Companion model failed:', err));
@@ -1390,6 +1413,7 @@ uniform float smoothing;`
 			loaderOverlay.classList.remove('visible');
 			setStatus('ready', (displayName || 'PERSOANA').toUpperCase());
 			nameOverlay.textContent = displayName || 'Persoana';
+			focusPotreeCameraOnObject(personGroup);
 			isLoading = false;
 		}, { once: true });
 
@@ -1411,18 +1435,46 @@ uniform float smoothing;`
 		personGroup.position.copy(tmp);
 	}
 
+	/** Reposition the Potree camera so a freshly loaded overlay object is centered + framed. */
+	function focusPotreeCameraOnObject(obj) {
+		try {
+			obj.updateMatrixWorld(true);
+			const box = new THREE.Box3().setFromObject(obj);
+			if (box.isEmpty()) return;
+			const center  = box.getCenter(new THREE.Vector3());
+			const size    = box.getSize(new THREE.Vector3());
+			const maxSize = Math.max(size.x, size.y, size.z);
+
+			const view = window.viewer.scene.view;
+			const cam  = window.viewer.scene.getActiveCamera();
+			if (!cam) return;
+
+			const fov = (cam.fov || 60) * Math.PI / 180;
+			const dist = (maxSize / (2 * Math.tan(fov / 2))) * 2.0;
+
+			const fwd = new THREE.Vector3();
+			cam.getWorldDirection(fwd);
+			if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+			fwd.normalize();
+
+			view.position.copy(center).addScaledVector(fwd, -dist);
+			view.radius = dist;
+			zoomAnchorPivot = null; // next slider drag re-anchors at this new pivot
+		} catch (_) {}
+	}
+
 	// ── LOAD GLB ───────────────────────────────────────────────
 	function loadModel(path, name) {
 		if (isLoading) return;
 		isLoading = true;
 		clearScene();
+		syncSceneAnchor();
+		hidePotreePointclouds();
 		walkControlsEl.classList.remove('visible');
 		setPersonVideoPanelVisible(false);
 		setPersonChromaPanelVisible(false);
 		loaderOverlay.classList.add('visible');
 		setStatus('loading', 'LOADING...');
-
-		syncSceneAnchor();
 
 		gltfLoader.load(resolveHref(path), (gltf) => {
 			const model  = gltf.scene;
@@ -1434,10 +1486,6 @@ uniform float smoothing;`
 			placeRootOnFloor(model, normScale);
 			model.position.add(worldToOverlayLocal(walkOriginOffset));
 
-			model.traverse(o => {
-				if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
-			});
-
 			overlayRoot.add(model);
 			currentModel = model;
 			currentType  = 'model';
@@ -1445,6 +1493,7 @@ uniform float smoothing;`
 			loaderOverlay.classList.remove('visible');
 			setStatus('ready', name.toUpperCase());
 			nameOverlay.textContent = name;
+			focusPotreeCameraOnObject(model);
 			isLoading = false;
 		}, undefined, (err) => {
 			console.error(err);
@@ -1467,19 +1516,19 @@ uniform float smoothing;`
 
 	function disposeMaterial(m) {
 		if (!m) return;
+		// Dispose every texture slot on the material — but DON'T null the property,
+		// because three.js' renderer reads those refs from its `dispose` event handler.
 		for (const key of TEXTURE_SLOT_KEYS) {
 			const t = m[key];
 			if (t && typeof t.dispose === 'function') {
 				try { t.dispose(); } catch (_) {}
 			}
-			if (key in m) m[key] = null;
 		}
 		if (m.uniforms) {
 			for (const k of Object.keys(m.uniforms)) {
 				const u = m.uniforms[k];
 				if (u && u.value && typeof u.value.dispose === 'function') {
 					try { u.value.dispose(); } catch (_) {}
-					u.value = null;
 				}
 			}
 		}
@@ -1554,24 +1603,53 @@ uniform float smoothing;`
 	rotateToggle.addEventListener('change', () => { autoRotate = rotateToggle.checked; });
 	walkToggle.addEventListener('change',   () => { walkActive  = walkToggle.checked; });
 
+	// Pivot captured at the start of a slider drag. We anchor against this
+	// fixed point and update BOTH view.position and view.radius — otherwise
+	// view.getPivot() (= position + direction * radius) drifts with the camera
+	// each input event and the slider only ever zooms out.
+	let zoomAnchorPivot = null;
+
+	function captureZoomAnchor() {
+		try {
+			const view = window.viewer.scene.view;
+			const p = view.getPivot();
+			if (p) zoomAnchorPivot = p.clone();
+		} catch (_) {}
+	}
+
 	function applyZoomFromSlider() {
 		const zoomMul = Math.max(0.35, parseFloat(modelScaleInput.value) / 10);
 		modelScaleVal.textContent = zoomMul.toFixed(1) + '×';
-		// Move Potree's camera along its current view direction (mirrors tur.html zoom behavior)
 		try {
-			const view  = window.viewer.scene.view;
-			const pivot = view.getPivot();
-			if (!pivot) return;
-			const camPos = view.position.clone();
-			const dir    = camPos.clone().sub(pivot);
-			const baseDist = (sceneSizeHint || 1) * 1.2;
-			const dist = baseDist / zoomMul;
-			if (dir.lengthSq() < 1e-6) dir.set(0.25, 0.2, 1);
-			dir.normalize().multiplyScalar(dist);
-			view.position.copy(pivot.clone().add(dir));
+			if (!zoomAnchorPivot) captureZoomAnchor();
+			if (!zoomAnchorPivot) return;
+
+			const view = window.viewer.scene.view;
+			const cam  = window.viewer.scene.getActiveCamera();
+			if (!cam) return;
+
+			// Camera's current forward direction (unit vector pointing where it looks)
+			const fwd = new THREE.Vector3();
+			cam.getWorldDirection(fwd);
+			if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+			fwd.normalize();
+
+			const baseDist    = (sceneSizeHint || 1) * 1.2;
+			const desiredDist = baseDist / zoomMul;
+
+			// position = anchor - forward * dist  →  getPivot() stays equal to anchor.
+			view.position.copy(zoomAnchorPivot).addScaledVector(fwd, -desiredDist);
+			view.radius = desiredDist;
 		} catch (_) {}
 	}
-	modelScaleInput.addEventListener('input', applyZoomFromSlider);
+
+	modelScaleInput.addEventListener('input',       applyZoomFromSlider);
+	modelScaleInput.addEventListener('pointerdown', captureZoomAnchor);
+	modelScaleInput.addEventListener('touchstart',  captureZoomAnchor);
+	modelScaleInput.addEventListener('pointerup',   () => { zoomAnchorPivot = null; });
+	modelScaleInput.addEventListener('pointercancel', () => { zoomAnchorPivot = null; });
+	modelScaleInput.addEventListener('touchend',     () => { zoomAnchorPivot = null; });
+	modelScaleInput.addEventListener('change',       () => { zoomAnchorPivot = null; });
 
 	if (personVideoScaleInput) {
 		personVideoScaleInput.addEventListener('input', syncPersonVideoScaleFromUI);
