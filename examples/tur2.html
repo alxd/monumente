@@ -1393,6 +1393,11 @@ uniform float smoothing;`
 			placePersonOnPath();
 
 			if (extraModelPath) {
+				// Persoana M1: a companion statue GLB loads alongside the video.
+				// The camera should orbit the STATUE (the static, primary subject),
+				// not the video billboard — otherwise rotating drags the camera
+				// around the moving / billboarding plane and the statue spins
+				// off-screen. We set the orbit pivot once the GLB is in.
 				gltfLoader.load(resolveHref(extraModelPath), (gltf) => {
 					if (myGen !== personLoadGen) return;
 					const m = gltf.scene;
@@ -1404,7 +1409,20 @@ uniform float smoothing;`
 					m.position.add(worldToOverlayLocal(walkOriginOffset));
 					m.userData.isCompanionModel = true;
 					overlayRoot.add(m);
-				}, undefined, (err) => console.warn('Companion model failed:', err));
+
+					// Re-anchor the camera on the statue so user orbit pivots there,
+					// and the video walks/billboards around the statue rather than
+					// the camera flying around the video.
+					focusPotreeCameraOnObject(m);
+				}, undefined, (err) => {
+					console.warn('Companion model failed:', err);
+					// Fallback: companion failed to load — focus on the video plane
+					// so the user still has SOMETHING centered in the view.
+					if (myGen === personLoadGen) focusPotreeCameraOnObject(personGroup);
+				});
+			} else {
+				// Plain Persoana (no companion) — the video IS the subject, focus on it.
+				focusPotreeCameraOnObject(personGroup);
 			}
 
 			walkControlsEl.classList.add('visible');
@@ -1413,7 +1431,6 @@ uniform float smoothing;`
 			loaderOverlay.classList.remove('visible');
 			setStatus('ready', (displayName || 'PERSOANA').toUpperCase());
 			nameOverlay.textContent = displayName || 'Persoana';
-			focusPotreeCameraOnObject(personGroup);
 			isLoading = false;
 		}, { once: true });
 
