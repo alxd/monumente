@@ -496,6 +496,35 @@
 
 		#model-scale-row input[type=range] { accent-color: var(--accent); }
 
+		/* ── Hide / show video toggle (lives inside the video panel) ── */
+		.hide-video-btn {
+			width: 100%;
+			margin-top: 12px;
+			padding: 9px 12px;
+			border-radius: 6px;
+			border: 1px solid rgba(255, 107, 53, 0.45);
+			background: rgba(255, 107, 53, 0.08);
+			color: var(--accent2);
+			font-family: 'Rajdhani', sans-serif;
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 1.5px;
+			text-transform: uppercase;
+			cursor: pointer;
+			transition: all 0.2s;
+		}
+		.hide-video-btn:hover {
+			background: rgba(255, 107, 53, 0.18);
+			box-shadow: 0 0 8px rgba(255, 107, 53, 0.35);
+			color: #fff;
+		}
+		.hide-video-btn.hidden-state {
+			background: rgba(255, 107, 53, 0.25);
+			color: #fff;
+			border-color: var(--accent2);
+			box-shadow: 0 0 10px rgba(255, 107, 53, 0.45);
+		}
+
 		#path-hint {
 			font-family: 'Share Tech Mono', monospace;
 			font-size: 9px;
@@ -690,26 +719,16 @@
 		<div class="section-title">Models</div>
 
 		<div id="model-list">
-			<button class="model-btn cloud-btn" data-name="Point Cloud" data-type="potree">
+			<button class="model-btn cloud-btn" data-name="Agriculture" data-type="agriculture">
 				<div class="icon">☁</div>
-				<div class="name">Point Cloud<span class="sub">sigeom.sa · potree</span></div>
-			</button>
-			<button class="model-btn" data-path="./models/statuie_florilor.glb" data-name="Statuie Florilor" data-type="model">
-				<div class="icon">◈</div>
-				<div class="name">Statuie Florilor<span class="sub">.glb</span></div>
+				<div class="name">Agriculture<span class="sub">point cloud · sigeom</span></div>
 			</button>
 			<button class="model-btn person-btn"
-					data-name="Persoana M1"
-					data-type="person-m1"
+					data-name="Monument"
+					data-type="monument"
 					data-model="./models/statuie_florilor.glb">
-				<div class="icon">🧍</div>
-				<div class="name">Persoana M1<span class="sub">video + statuie florilor</span></div>
-			</button>
-			<button class="model-btn person-btn"
-					data-name="Persoana"
-					data-type="person">
-				<div class="icon">🧍</div>
-				<div class="name">Persoana<span class="sub">chroma key · mp4</span></div>
+				<div class="icon">◈</div>
+				<div class="name">Monument<span class="sub">video + statue</span></div>
 			</button>
 		</div>
 
@@ -768,6 +787,10 @@
 						   title="Scale only the chroma-key video billboard">
 					<span id="person-video-scale-val">0.7×</span>
 				</div>
+				<button type="button" class="hide-video-btn" id="hide-video-btn"
+						title="Toggle the chroma-key video billboard on / off without unloading it">
+					Hide Video
+				</button>
 			</div>
 
 			<div class="slider-row" id="model-scale-row">
@@ -1066,7 +1089,11 @@
 				if (!box.isEmpty()) {
 					const sz = box.getSize(new THREE.Vector3());
 					sceneSizeHint = Math.max(sz.x, sz.y, sz.z) || 1;
-					walkPathScale = Math.max(1, sceneSizeHint * 0.04);
+					// Walk path radius — kept tight so the chroma video sits close to
+					// the Monument statue (was sceneSizeHint * 0.04 = roughly the model
+					// size, so the video walked at the model's perimeter; ×0.012 puts
+					// the resting position right next to the statue instead).
+					walkPathScale = Math.max(0.4, sceneSizeHint * 0.012);
 				}
 			}
 		} catch (_) { /* ignore */ }
@@ -1388,21 +1415,12 @@ uniform float smoothing;`
 		}
 	}
 
-	// ── LOAD PERSON ────────────────────────────────────────────
-	function loadPerson(displayName, extraModelPath) {
+	// ── VIDEO PIPELINE (shared by Monument and Agriculture) ────
+	// Builds the chroma-key video plane + texture and attaches it to overlayRoot.
+	// `onReady` fires once the video can play and personGroup/personMesh/videoTex
+	// have all been wired up; `onError` fires if the video fails to decode.
+	function setupVideoPipeline(myGen, onReady, onError) {
 		const videoPath = getPersonVideoPath();
-		const myGen = ++personLoadGen;
-		isLoading = true;
-		clearScene();
-		// Re-sync anchor BEFORE hiding the point cloud — getPivot()/bbox math
-		// works even on hidden clouds, but keep ordering predictable.
-		syncSceneAnchor();
-		hidePotreePointclouds();
-		walkControlsEl.classList.remove('visible');
-		setPersonVideoPanelVisible(false);
-		setPersonChromaPanelVisible(false);
-		loaderOverlay.classList.add('visible');
-		setStatus('loading', 'LOADING VIDEO...');
 
 		videoEl = document.createElement('video');
 		videoEl.src         = videoPath;
@@ -1441,13 +1459,37 @@ uniform float smoothing;`
 			walkProgress = WALK_START_T;
 			syncPersonVideoScaleFromUI();
 			placePersonOnPath();
+			resetVideoVisibility();
 
+			if (onReady) onReady();
+		}, { once: true });
+
+		videoEl.addEventListener('error', () => {
+			if (myGen !== personLoadGen) return;
+			if (onError) onError();
+		}, { once: true });
+
+		videoEl.load();
+	}
+
+	// ── LOAD MONUMENT (chroma video billboard + statue GLB) ────
+	// Hides the point cloud, drops the statue at the cloud pivot, and orbits the
+	// video plane around it. Camera focuses on the statue (not the video) so user
+	// rotation pivots on the statue instead of the moving billboard.
+	function loadMonument(displayName, extraModelPath) {
+		const myGen = ++personLoadGen;
+		isLoading = true;
+		clearScene();
+		syncSceneAnchor();
+		hidePotreePointclouds();
+		walkControlsEl.classList.remove('visible');
+		setPersonVideoPanelVisible(false);
+		setPersonChromaPanelVisible(false);
+		loaderOverlay.classList.add('visible');
+		setStatus('loading', 'LOADING VIDEO...');
+
+		setupVideoPipeline(myGen, () => {
 			if (extraModelPath) {
-				// Persoana M1: a companion statue GLB loads alongside the video.
-				// The camera should orbit the STATUE (the static, primary subject),
-				// not the video billboard — otherwise rotating drags the camera
-				// around the moving / billboarding plane and the statue spins
-				// off-screen. We set the orbit pivot once the GLB is in.
 				gltfLoader.load(resolveHref(extraModelPath), (gltf) => {
 					if (myGen !== personLoadGen) return;
 					const m = gltf.scene;
@@ -1460,18 +1502,12 @@ uniform float smoothing;`
 					m.userData.isCompanionModel = true;
 					overlayRoot.add(m);
 
-					// Re-anchor the camera on the statue so user orbit pivots there,
-					// and the video walks/billboards around the statue rather than
-					// the camera flying around the video.
 					focusPotreeCameraOnObject(m);
 				}, undefined, (err) => {
 					console.warn('Companion model failed:', err);
-					// Fallback: companion failed to load — focus on the video plane
-					// so the user still has SOMETHING centered in the view.
 					if (myGen === personLoadGen) focusPotreeCameraOnObject(personGroup);
 				});
 			} else {
-				// Plain Persoana (no companion) — the video IS the subject, focus on it.
 				focusPotreeCameraOnObject(personGroup);
 			}
 
@@ -1479,19 +1515,14 @@ uniform float smoothing;`
 			setPersonVideoPanelVisible(true);
 			setPersonChromaPanelVisible(true);
 			loaderOverlay.classList.remove('visible');
-			setStatus('ready', (displayName || 'PERSOANA').toUpperCase());
-			nameOverlay.textContent = displayName || 'Persoana';
+			setStatus('ready', (displayName || 'MONUMENT').toUpperCase());
+			nameOverlay.textContent = displayName || 'Monument';
 			isLoading = false;
-		}, { once: true });
-
-		videoEl.addEventListener('error', () => {
-			if (myGen !== personLoadGen) return;
+		}, () => {
 			loaderOverlay.classList.remove('visible');
 			setStatus('error', 'VIDEO LOAD FAILED');
 			isLoading = false;
-		}, { once: true });
-
-		videoEl.load();
+		});
 	}
 
 	function placePersonOnPath() {
@@ -1651,11 +1682,15 @@ uniform float smoothing;`
 		stopAudio();
 	}
 
-	// ── LOAD POTREE POINT CLOUD ────────────────────────────────
-	// "Show the Potree cloud" menu entry — clears the overlay scene,
-	// re-shows the hidden point cloud(s), and re-frames the camera on them.
-	function loadPotreeCloud(displayName) {
+	// ── LOAD AGRICULTURE (Potree point cloud + chroma video overlay) ──
+	// Re-shows the point cloud(s), refits the Potree camera on them, and ALSO
+	// builds the same chroma-key video pipeline the Monument uses, so the user
+	// has the full video panel + chroma options + walk controls + Hide Video
+	// toggle on top of the cloud. The orbit pivot stays on the cloud (we never
+	// call focusPotreeCameraOnObject), so dragging rotates around the cloud.
+	function loadAgriculture(displayName) {
 		if (isLoading) return;
+		const myGen = ++personLoadGen;
 		isLoading = true;
 		clearScene();
 		walkControlsEl.classList.remove('visible');
@@ -1667,14 +1702,25 @@ uniform float smoothing;`
 		showPotreePointclouds();
 		try { window.viewer.fitToScreen(); } catch (_) {}
 
-		// Refresh anchor/scene-size hint against the now-visible cloud
+		// Anchor refresh runs against the now-visible cloud (pivot, sceneSizeHint)
 		syncSceneAnchor();
 		zoomAnchorPivot = null;
 
-		loaderOverlay.classList.remove('visible');
-		setStatus('ready', (displayName || 'POINT CLOUD').toUpperCase());
-		nameOverlay.textContent = displayName || 'Point Cloud';
-		isLoading = false;
+		setupVideoPipeline(myGen, () => {
+			walkControlsEl.classList.add('visible');
+			setPersonVideoPanelVisible(true);
+			setPersonChromaPanelVisible(true);
+			loaderOverlay.classList.remove('visible');
+			setStatus('ready', (displayName || 'AGRICULTURE').toUpperCase());
+			nameOverlay.textContent = displayName || 'Agriculture';
+			isLoading = false;
+		}, () => {
+			// Video failed but the cloud is still up — leave the user with the cloud.
+			loaderOverlay.classList.remove('visible');
+			setStatus('ready', (displayName || 'AGRICULTURE').toUpperCase());
+			nameOverlay.textContent = displayName || 'Agriculture';
+			isLoading = false;
+		});
 	}
 
 	// ── SIDEBAR BUTTONS ────────────────────────────────────────
