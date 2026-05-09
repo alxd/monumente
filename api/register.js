@@ -4,7 +4,8 @@
  * Variabile de mediu (Vercel → Project → Settings → Environment Variables):
  * - RESEND_API_KEY — cheie API Resend (https://resend.com)
  * - RESEND_FROM — expeditor verificat, ex: "Platformă <noreply@domeniul-tău.ro>"
- * - BLOB_READ_WRITE_TOKEN — din Vercel Blob (stochează monumente/inregistrari.csv, exportabil în Excel)
+ * - BLOB_READ_WRITE_TOKEN — din Vercel Blob (CSV: monumente/inregistrari.csv)
+ * - BLOB_ACCESS — opțional: 'private' (implicit) sau 'public' dacă store-ul este public
  * - REGISTRATION_SHEET_WEBHOOK — opțional: URL Google Apps Script / Zapier care primește JSON { name, email, at }
  *
  * Este necesar cel puțin unul dintre: RESEND_API_KEY, BLOB_READ_WRITE_TOKEN, REGISTRATION_SHEET_WEBHOOK.
@@ -82,12 +83,12 @@ async function sendResendEmail(name, email) {
 async function appendCsvBlob(name, email) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) return { ok: false, skip: true };
-  const { list, put } = await import('@vercel/blob');
+  const access = process.env.BLOB_ACCESS === 'public' ? 'public' : 'private';
+  const { get, put } = await import('@vercel/blob');
   let csv = 'data_ora_utc,nume,email\n';
-  const { blobs } = await list({ prefix: 'monumente/', token });
-  const existing = blobs.find((b) => b.pathname === CSV_PATHNAME);
-  if (existing) {
-    const txt = await fetch(existing.url).then((x) => x.text());
+  const existing = await get(CSV_PATHNAME, { access, token });
+  if (existing && existing.stream) {
+    const txt = await new Response(existing.stream).text();
     if (txt && txt.trim()) csv = txt.endsWith('\n') ? txt : `${txt}\n`;
   }
   const row = [
@@ -96,7 +97,7 @@ async function appendCsvBlob(name, email) {
     escapeCsvField(email),
   ].join(',');
   await put(CSV_PATHNAME, `${csv}${row}\n`, {
-    access: 'public',
+    access,
     addRandomSuffix: false,
     allowOverwrite: true,
     token,
