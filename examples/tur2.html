@@ -1857,26 +1857,22 @@ uniform float smoothing;`
 
 	function disposeMaterial(m) {
 		if (!m) return;
-		function disposeTex(t) {
-			if (!t || typeof t.dispose !== 'function') return;
-			const img = t.image;
-			try { t.dispose(); } catch (_) {}
-			// ImageBitmap GLB textures (fetch + createImageBitmap path) need
-			// `.close()` or decoded pixels stay in RAM across model swaps.
-			if (img && typeof img.close === 'function') {
-				try { img.close(); } catch (_) {}
-			}
-		}
+		// Dispose every texture slot on the material — but DON'T null the property,
+		// because three.js' renderer reads those refs from its `dispose` event handler.
+		// IMPORTANT: do NOT call `.close()` on the texture's image. ImageBitmap
+		// instances created by the blob-URL TextureLoader patch may be aliased
+		// inside GLTFLoader / renderer internals, and closing them invalidates
+		// any subsequent parse that re-uses the same source image.
 		for (const key of TEXTURE_SLOT_KEYS) {
-			disposeTex(m[key]);
+			const t = m[key];
+			if (t && typeof t.dispose === 'function') {
+				try { t.dispose(); } catch (_) {}
+			}
 		}
 		if (m.uniforms) {
 			for (const k of Object.keys(m.uniforms)) {
 				const u = m.uniforms[k];
-				if (!u || !u.value) continue;
-				if (u.value.isTexture) {
-					disposeTex(u.value);
-				} else if (typeof u.value.dispose === 'function') {
+				if (u && u.value && typeof u.value.dispose === 'function') {
 					try { u.value.dispose(); } catch (_) {}
 				}
 			}
@@ -1925,11 +1921,12 @@ uniform float smoothing;`
 		personMesh  = null;
 		currentType = null;
 
-		// Drop renderer-side caches so freed textures actually leave the GPU
+		// Drop renderer-side caches so freed textures actually leave the GPU.
+		// NOTE: we deliberately do NOT call `THREE.Cache.clear()` here — the
+		// blob-URL aware TextureLoader patch and GLTFLoader rely on the cache
+		// being warm to resolve embedded GLB textures, and clearing it on every
+		// model swap reproducibly broke texture loading on the next click.
 		try { overlayRenderer.renderLists.dispose(); } catch (_) {}
-		// Evict FileLoader / image blob cache entries from prior GLB parses so
-		// switching models repeatedly doesn't retain every embedded texture in RAM.
-		try { THREE.Cache.clear(); } catch (_) {}
 
 		stopAudio();
 	}
