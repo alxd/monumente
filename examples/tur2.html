@@ -897,17 +897,50 @@
 	import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 	// ── BLOB-URL TEXTURE FIX (run once, at module scope) ───────
-	// GLBs with embedded textures are decoded by GLTFLoader → TextureLoader →
-	// ImageLoader → `<img>.src = blob:...`. On certain Chrome / Edge / Vercel
-	// combinations the `<img>` load silently fails for `blob:` URLs and we
-	// see `THREE.GLTFLoader: Couldn't load texture blob:...` and a textureless
-	// model. Two layered fixes:
-	//   (a) ImageLoader: drop `crossOrigin` for blob URLs (cheap, fixes the
-	//       common "anonymous makes blob load fail" case).
-	//   (b) TextureLoader: for blob URLs, completely bypass HTMLImageElement
-	//       and use `fetch` + `createImageBitmap` — ImageBitmap is fully
-	//       supported by THREE for GPU upload, and `fetch` is much more
-	//       reliable than `<img>.src` for blob: schemes.
+	// GLBs with embedded textures fail with `THREE.GLTFLoader: Couldn't load
+	// texture blob:...` because of how three.js's loaders fetch blob URLs:
+	//
+	//   • ImageBitmapLoader (the loader GLTFLoader picks on Chrome/Edge) does
+	//       fetchOptions.credentials = (this.crossOrigin === 'anonymous')
+	//           ? 'same-origin' : 'include';
+	//     For a `blob:` URL `'include'` triggers a CORS-credentialed request
+	//     which the blob can't satisfy → fetch rejects, texture is missing.
+	//   • TextureLoader (Safari / old Firefox) goes through ImageLoader →
+	//     `<img>.src = blob:...` and can fail when crossOrigin = 'anonymous'.
+	//
+	// Both paths are patched below to bypass the credentialed/CORS plumbing
+	// for blob URLs and just do a bare same-document fetch + createImageBitmap.
+	(function patchImageBitmapLoaderForBlobUrls() {
+		const proto = THREE.ImageBitmapLoader && THREE.ImageBitmapLoader.prototype;
+		if (!proto || proto.__blobPatched) return;
+		if (typeof createImageBitmap !== 'function') return;
+		const origLoad = proto.load;
+		proto.load = function (url, onLoad, onProgress, onError) {
+			if (typeof url !== 'string' || !url.startsWith('blob:')) {
+				return origLoad.call(this, url, onLoad, onProgress, onError);
+			}
+			const scope = this;
+			scope.manager.itemStart(url);
+			fetch(url, { credentials: 'omit' })
+				.then(r => r.blob())
+				.then(b => createImageBitmap(b, Object.assign(
+					{ premultiplyAlpha: 'none' },
+					scope.options || {},
+					{ colorSpaceConversion: 'none' }
+				)))
+				.then(bitmap => {
+					if (onLoad) onLoad(bitmap);
+					scope.manager.itemEnd(url);
+				})
+				.catch(err => {
+					console.error('Blob ImageBitmap load failed:', url, err);
+					if (onError) onError(err);
+					scope.manager.itemError(url);
+					scope.manager.itemEnd(url);
+				});
+		};
+		proto.__blobPatched = true;
+	})();
 	(function patchImageLoaderForBlobUrls() {
 		const proto = THREE.ImageLoader && THREE.ImageLoader.prototype;
 		if (!proto || proto.__blobPatched) return;
@@ -923,7 +956,7 @@
 	(function patchTextureLoaderForBlobUrls() {
 		const proto = THREE.TextureLoader && THREE.TextureLoader.prototype;
 		if (!proto || proto.__blobPatched) return;
-		if (typeof createImageBitmap !== 'function') return; // Old browsers — fall back to ImageLoader patch.
+		if (typeof createImageBitmap !== 'function') return;
 		const origLoad = proto.load;
 		proto.load = function (url, onLoad, onProgress, onError) {
 			if (typeof url !== 'string' || !url.startsWith('blob:')) {
@@ -1367,11 +1400,14 @@
 	const WALK_START_T = findClosestCurveT(walkPath, walkPathAnchor);
 
 	const gltfLoader = new GLTFLoader();
-	// Belt-and-suspenders for the blob-URL texture issue (see top-of-script
-	// patchImageLoaderForBlobUrls). Propagates undefined crossOrigin all the
-	// way down through this loader's internally-created TextureLoader →
-	// ImageLoader chain.
-	gltfLoader.setCrossOrigin(undefined);
+	// NOTE: do NOT call gltfLoader.setCrossOrigin(undefined) here. That would
+	// propagate to the internally-created ImageBitmapLoader, where
+	//   fetchOptions.credentials = (this.crossOrigin === 'anonymous')
+	//                             ? 'same-origin' : 'include';
+	// flips credentials to 'include' for blob: URLs and the browser rejects
+	// the fetch as a CORS-credentialed request the blob can't satisfy. Leave
+	// crossOrigin at its default 'anonymous' and rely on the ImageBitmapLoader
+	// blob-URL patch installed at the top of this script.
 
 	// ── CHROMA KEY MATERIAL (verbatim from tur.html) ──────────
 	function injectMeshBasicChroma(shader, chromaMapFrag) {
