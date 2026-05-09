@@ -896,118 +896,72 @@
 	import { GLTFLoader }     from 'three/addons/loaders/GLTFLoader.js';
 	import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-	// ── BLOB-URL TEXTURE FIX (run once, at module scope) ───────
-	// ROOT CAUSE: GLTFLoader extracts embedded textures as blob: URLs from the
-	// GLB's ArrayBuffer, then calls URL.revokeObjectURL() in its cleanup path.
-	// This is a race condition: on Chrome/Edge/Brave the blob URL can be revoked
-	// BEFORE the <img>.src load completes (especially on first load or under any
-	// CPU/GPU load), silently failing with "Couldn't load texture blob:...".
-	// The intermittent nature is exactly explained by this timing race.
+	// ── BLOB-URL TEXTURE FIX ───────────────────────────────────
+	// CONFIRMED ROOT CAUSE (Chrome/Edge/Brave, three.js r160):
 	//
-	// Fix strategy (two layers):
-	//   (1) Defer URL.revokeObjectURL for blob: URLs — keep the URL alive until
-	//       all pending <img> loads referencing it have settled. This closes the
-	//       race completely regardless of timing.
-	//   (2) Patch THREE.ImageLoader to use fetch+createImageBitmap instead of
-	//       <img>.src for blob: URLs. ImageBitmap bypasses the browser's
-	//       cross-origin / CORS checks for blob: entirely and is fully supported
-	//       by THREE.js for GPU upload. This is the belt AND suspenders.
+	// GLTFLoader r160 detects createImageBitmap support and uses ImageBitmapLoader
+	// (not ImageLoader) on all Chromium browsers. ImageBitmapLoader does:
+	//     fetch(blobUrl) → response.blob() → createImageBitmap(blob)
+	// Meanwhile GLTFLoader calls URL.revokeObjectURL(blobUrl) in its cleanup.
+	// When the revoke wins the race against fetch(), the fetch fails with a
+	// network error → "THREE.GLTFLoader: Couldn't load texture blob:..."
+	// This is intermittent because it's a pure CPU scheduling race.
+	//
+	// THE FIX: intercept URL.revokeObjectURL and the global fetch() to track
+	// all in-flight fetch calls on blob: URLs. If a revoke arrives while a
+	// fetch is still pending, defer it until the fetch settles. This makes
+	// the blob URL stay valid for the full duration of the fetch → bitmap
+	// pipeline, killing the race permanently.
+	(function fixBlobUrlRaceCondition() {
+		if (URL.__blobFetchSafe) return;
 
-	// Layer 1: Safe revokeObjectURL — defer until no pending img loads reference the URL.
-	(function patchRevokeObjectURL() {
-		if (URL.__blobRevokeSafe) return;
-		const _pendingBlobImgs = new Map(); // url → Set<img>
-		const _deferredRevokes = new Set(); // URLs waiting to be revoked
+		// Track pending fetch calls: blobUrl → refcount
+		const _pendingFetches = new Map();
+		const _deferredRevokes = new Set();
 
-		// Track every <img> whose src is set to a blob: URL
-		const origCreateElement = document.createElement.bind(document);
-		document.createElement = function(tag, options) {
-			const el = origCreateElement(tag, options);
-			if (tag.toLowerCase() === 'img') {
-				const origDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')
-					|| Object.getOwnPropertyDescriptor(Element.prototype, 'src');
-				// Watch src assignments via setAttribute too
-				const origSetAttribute = el.setAttribute.bind(el);
-				el.setAttribute = function(name, value) {
-					origSetAttribute(name, value);
-					if (name === 'src' && typeof value === 'string' && value.startsWith('blob:')) {
-						if (!_pendingBlobImgs.has(value)) _pendingBlobImgs.set(value, new Set());
-						_pendingBlobImgs.get(value).add(el);
-					}
-				};
-				// Watch direct .src = '...' assignment
-				let _lastSrc = '';
-				Object.defineProperty(el, 'src', {
-					get() { return _lastSrc; },
-					set(value) {
-						_lastSrc = value;
-						origSetAttribute('src', value);
-						if (typeof value === 'string' && value.startsWith('blob:')) {
-							if (!_pendingBlobImgs.has(value)) _pendingBlobImgs.set(value, new Set());
-							_pendingBlobImgs.get(value).add(el);
-						}
-					},
-					configurable: true
-				});
-				const cleanup = () => {
-					const src = _lastSrc;
-					if (src && src.startsWith('blob:')) {
-						const set = _pendingBlobImgs.get(src);
-						if (set) { set.delete(el); if (set.size === 0) _pendingBlobImgs.delete(src); }
-						// If this URL was deferred for revocation and now has no pending loads, revoke it.
-						if (_deferredRevokes.has(src) && !_pendingBlobImgs.has(src)) {
-							_deferredRevokes.delete(src);
-							try { URL._origRevoke(src); } catch(_) {}
-						}
-					}
-				};
-				el.addEventListener('load',  cleanup, { once: true });
-				el.addEventListener('error', cleanup, { once: true });
+		function _settle(url) {
+			const n = (_pendingFetches.get(url) || 1) - 1;
+			if (n <= 0) {
+				_pendingFetches.delete(url);
+				if (_deferredRevokes.has(url)) {
+					_deferredRevokes.delete(url);
+					try { URL._origRevoke(url); } catch(_) {}
+				}
+			} else {
+				_pendingFetches.set(url, n);
 			}
-			return el;
+		}
+
+		// Wrap global fetch to track blob: URL requests
+		const _origFetch = window.fetch.bind(window);
+		window.fetch = function(input, init) {
+			const url = (typeof input === 'string') ? input
+				: (input && typeof input.url === 'string') ? input.url
+				: null;
+			if (url && url.startsWith('blob:')) {
+				_pendingFetches.set(url, (_pendingFetches.get(url) || 0) + 1);
+				return _origFetch(input, init).then(
+					res => { _settle(url); return res; },
+					err => { _settle(url); return Promise.reject(err); }
+				);
+			}
+			return _origFetch(input, init);
 		};
 
+		// Defer revokeObjectURL while a fetch is still in flight
 		URL._origRevoke = URL.revokeObjectURL.bind(URL);
 		URL.revokeObjectURL = function(url) {
 			if (typeof url !== 'string' || !url.startsWith('blob:')) {
 				return URL._origRevoke(url);
 			}
-			if (_pendingBlobImgs.has(url) && _pendingBlobImgs.get(url).size > 0) {
-				// Still loading — defer the revoke until all img loads settle
-				_deferredRevokes.add(url);
+			if (_pendingFetches.has(url)) {
+				_deferredRevokes.add(url); // revoke once fetch settles
 			} else {
 				URL._origRevoke(url);
 			}
 		};
-		URL.__blobRevokeSafe = true;
-	})();
 
-	// Layer 2: Patch THREE.ImageLoader to use fetch+createImageBitmap for blob: URLs,
-	// completely bypassing the <img>.src path and its CORS/timing issues.
-	(function patchImageLoaderForBlobUrls() {
-		const proto = THREE.ImageLoader && THREE.ImageLoader.prototype;
-		if (!proto || proto.__blobPatched) return;
-		if (typeof createImageBitmap !== 'function') return; // Fallback: Layer 1 alone handles it.
-		const origLoad = proto.load;
-		proto.load = function (url, onLoad, onProgress, onError) {
-			if (typeof url !== 'string' || !url.startsWith('blob:')) {
-				return origLoad.call(this, url, onLoad, onProgress, onError);
-			}
-			// Use fetch+createImageBitmap — immune to crossOrigin/CORS issues on blob: URLs.
-			fetch(url)
-				.then(r => r.blob())
-				.then(b => createImageBitmap(b, { imageOrientation: 'flipY', premultiplyAlpha: 'none' }))
-				.then(bitmap => { if (onLoad) onLoad(bitmap); })
-				.catch(err => {
-					console.warn('blob ImageBitmap fallback failed, retrying via <img>:', url, err);
-					// Last-resort fallback: let THREE's original <img> path try once more
-					// (Layer 1 ensures the blob URL is still alive at this point).
-					origLoad.call(this, url, onLoad, onProgress, onError);
-				});
-			// Return a placeholder so THREE's internal promise chain doesn't throw.
-			return { width: 0, height: 0 };
-		};
-		proto.__blobPatched = true;
+		URL.__blobFetchSafe = true;
 	})();
 
 	/** Resolve ./models/... against this HTML URL */
@@ -1426,9 +1380,8 @@
 	const WALK_START_T = findClosestCurveT(walkPath, walkPathAnchor);
 
 	const gltfLoader = new GLTFLoader();
-	// crossOrigin must be unset for blob: URLs — the deferred-revoke + ImageBitmap
-	// patches above handle the real race condition, but leaving crossOrigin='anonymous'
-	// on an <img> pointed at a blob: URL is also a known failure mode on some builds.
+	// crossOrigin must not be 'anonymous' for blob: URLs (belt-and-suspenders;
+	// the fetch-interception fix above is the real protection).
 	gltfLoader.setCrossOrigin(undefined);
 
 	// ── CHROMA KEY MATERIAL (verbatim from tur.html) ──────────
