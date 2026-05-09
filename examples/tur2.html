@@ -979,9 +979,12 @@
 		} catch (_) {}
 	}
 
-	// Disable THREE.Cache so a re-clicked GLB always re-decodes its textures fresh,
-	// instead of returning stale handles to textures we already disposed.
-	THREE.Cache.enabled = false;
+	// Keep THREE.Cache ON. With it OFF, GLBs with embedded textures sometimes log
+	// `GLTFLoader: Couldn't load texture blob:...` because the blob URLs the loader
+	// extracts get released between the GLB parse and the HTMLImageElement.src load.
+	// Cached + the IBL env (set above via PMREM/RoomEnvironment) + the careful
+	// per-material disposal below gives correct fresh textures on every re-click.
+	THREE.Cache.enabled = true;
 
 	// IBL environment for GLB MeshStandardMaterial (PBR).
 	// Without this, GLB materials with even moderate metalness render nearly flat —
@@ -1122,7 +1125,10 @@
 		const s = parseFloat(personVideoScaleInput.value) / 10;
 		personVideoScaleVal.textContent = s.toFixed(1) + '×';
 		if (personGroup) {
-			const worldScale = s * Math.max(1, sceneSizeHint * 0.012);
+			// World-scale baseline tuned so the chroma plane is clearly visible
+			// against a Potree point cloud. (Was sceneSizeHint * 0.012 — too small;
+			// 0.05 makes the billboard ~4x larger relative to the cloud surface.)
+			const worldScale = s * Math.max(2, sceneSizeHint * 0.05);
 			personGroup.scale.setScalar(worldScale);
 		}
 	}
@@ -1692,6 +1698,13 @@ uniform float smoothing;`
 		if (isLoading) return;
 		const myGen = ++personLoadGen;
 		isLoading = true;
+
+		// If the cloud is already visible (e.g. fresh page load, or chroma-mode
+		// swap while in Agriculture) we must NOT call fitToScreen() — it would
+		// snap the camera back and undo any zoom/pan the user has done.
+		const pcs = (window.viewer && window.viewer.scene && window.viewer.scene.pointclouds) || [];
+		const cloudWasVisible = pcs.length > 0 && pcs.every(p => p.visible !== false);
+
 		clearScene();
 		walkControlsEl.classList.remove('visible');
 		setPersonVideoPanelVisible(false);
@@ -1700,7 +1713,9 @@ uniform float smoothing;`
 		setStatus('loading', 'POINT CLOUD...');
 
 		showPotreePointclouds();
-		try { window.viewer.fitToScreen(); } catch (_) {}
+		if (!cloudWasVisible) {
+			try { window.viewer.fitToScreen(); } catch (_) {}
+		}
 
 		// Anchor refresh runs against the now-visible cloud (pivot, sceneSizeHint)
 		syncSceneAnchor();
@@ -1905,11 +1920,31 @@ uniform float smoothing;`
 		requestAnimationFrame(animate);
 		const delta = clock.getDelta();
 
-		syncCameraFromPotree();
-
-		if (currentType === 'model' && autoRotate && currentModel) {
-			currentModel.rotation.y += delta * 0.4;
+		// Auto-rotate orbits Potree's camera around the current view pivot in the
+		// world's vertical (Z-up) axis. Works for both Monument (camera circles the
+		// statue) and Agriculture (camera circles the cloud / video). The previous
+		// `currentModel.rotation.y` path required `currentType === 'model'` which
+		// the new menu (Monument/Agriculture) never sets.
+		if (autoRotate) {
+			try {
+				const view = window.viewer.scene.view;
+				if (view && view.getPivot) {
+					const pivot = view.getPivot();
+					if (pivot) {
+						const angle = delta * 0.4;
+						const cosA = Math.cos(angle), sinA = Math.sin(angle);
+						const offX = view.position.x - pivot.x;
+						const offY = view.position.y - pivot.y;
+						view.position.x = pivot.x + offX * cosA - offY * sinA;
+						view.position.y = pivot.y + offX * sinA + offY * cosA;
+						// Keep yaw in sync for any subsequent user input
+						if (typeof view.yaw === 'number') view.yaw -= angle;
+					}
+				}
+			} catch (_) {}
 		}
+
+		syncCameraFromPotree();
 
 		if (currentType === 'person' && personGroup && personMesh) {
 			if (videoTex) videoTex.needsUpdate = true;
@@ -1964,6 +1999,32 @@ uniform float smoothing;`
 	}
 
 	setStatus('ready', 'POINT CLOUD READY');
+
+	// ── AUTO-LOAD AGRICULTURE ON INITIAL CLOUD-READY ───────────
+	// Without this, the cloud appears via the original Potree init script but
+	// (a) no menu item is highlighted, (b) syncSceneAnchor never runs so the
+	// zoom slider's baseDist stays at 1, making "1.0× → 4.0×" snap the camera
+	// inside the cloud, and (c) the chroma video isn't loaded. By simulating
+	// a click on the Agriculture button we go through the exact same code path
+	// as a manual menu click, so initial state == post-click state.
+	let hasAutoLoadedAgriculture = false;
+	function maybeAutoLoadAgriculture() {
+		if (hasAutoLoadedAgriculture || isLoading) return;
+		if (!window.viewer || !window.viewer.scene) return;
+		const pcs = window.viewer.scene.pointclouds;
+		if (!pcs || pcs.length === 0) return;
+		const btn = document.querySelector('.model-btn[data-type="agriculture"]');
+		if (!btn) return;
+		hasAutoLoadedAgriculture = true;
+		if (!btn.classList.contains('active')) btn.click();
+	}
+	window.addEventListener('potree:pointcloud-ready', maybeAutoLoadAgriculture);
+	maybeAutoLoadAgriculture(); // immediate try (in case the cloud already finished)
+	const autoLoadPoll = setInterval(() => {
+		if (hasAutoLoadedAgriculture) { clearInterval(autoLoadPoll); return; }
+		maybeAutoLoadAgriculture();
+	}, 200);
+	setTimeout(() => clearInterval(autoLoadPoll), 30000);
 
 	} /* end initOverlay */
 	</script>
