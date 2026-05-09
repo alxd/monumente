@@ -107,6 +107,44 @@
 			line-height: 1.1;
 		}
 
+		.sidebar-nav-icons {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-bottom: 14px;
+		}
+		.sidebar-nav-icons .nav-icon-link {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 30px;
+			height: 30px;
+			border-radius: 9px;
+			border: 1px solid var(--border);
+			background: rgba(12, 18, 26, 0.92);
+			color: var(--accent);
+			text-decoration: none;
+			transition: border-color 0.15s, color 0.15s, background 0.15s;
+		}
+		.sidebar-nav-icons .nav-icon-link:hover {
+			border-color: rgba(0, 200, 255, 0.45);
+			background: var(--active-bg);
+			color: #e6f6ff;
+		}
+		.sidebar-nav-icons .nav-icon-link svg {
+			width: 15px;
+			height: 15px;
+			stroke: currentColor;
+			fill: none;
+			stroke-width: 2;
+			stroke-linecap: round;
+			stroke-linejoin: round;
+		}
+		.sidebar-nav-icons .nav-icon-link[href*="map"] svg {
+			width: 16px;
+			height: 16px;
+		}
+
 		/* ── MODEL LIST ── */
 		.section-title {
 			font-family: 'Share Tech Mono', monospace;
@@ -705,6 +743,18 @@
 	<!-- ─────────── CUSTOM SIDEBAR (ported from tur.html) ─────────── -->
 	<div id="sidebar">
 		<div class="sidebar-header">
+			<nav class="sidebar-nav-icons" aria-label="Navigare">
+				<a href="/examples/map.html" class="nav-icon-link" title="Hartă interactivă" aria-label="Înapoi la hartă">
+					<svg viewBox="0 0 24 24" aria-hidden="true">
+						<polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
+						<line x1="8" y1="2" x2="8" y2="18"/>
+						<line x1="16" y1="6" x2="16" y2="22"/>
+					</svg>
+				</a>
+				<a href="/" class="nav-icon-link" title="Pagina principală" aria-label="Pagina principală">
+					<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+				</a>
+			</nav>
 			<div class="label"></div>
 			<h1>3D<br>Viewer</h1>
 		</div>

@@ -85,6 +85,39 @@
         height: 2px;
         background: linear-gradient(90deg, var(--accent), var(--accent2));
       }
+      .side-nav-back {
+        display: flex;
+        justify-content: flex-end;
+        margin: -2px 0 6px;
+        padding: 0 4px;
+      }
+      .side-nav-back a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(12, 18, 26, 0.92);
+        color: var(--accent);
+        text-decoration: none;
+        transition: border-color 0.15s, color 0.15s, background 0.15s;
+      }
+      .side-nav-back a:hover {
+        border-color: rgba(0, 200, 255, 0.45);
+        background: rgba(18, 28, 40, 0.98);
+        color: #e6f6ff;
+      }
+      .side-nav-back svg {
+        width: 17px;
+        height: 17px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
       .brand {
         display: flex;
         align-items: center;
@@ -591,6 +624,11 @@
 
       const categoriesEl = document.getElementById("categories");
       categoriesEl.innerHTML = `
+        <nav class="side-nav-back" aria-label="Navigare">
+          <a href="/" title="Pagina principală" aria-label="Înapoi la pagina principală">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          </a>
+        </nav>
         <div class="brand">
           <div class="flag"></div>
           <div>
