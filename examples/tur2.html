@@ -1381,6 +1381,32 @@
 	// the fetch-interception fix above is the real protection).
 	gltfLoader.setCrossOrigin(undefined);
 
+	// Some three.js builds prefer ImageBitmapLoader for GLTF textures when
+	// createImageBitmap exists. On several browsers / GPU stacks this is the
+	// code path that produces "Couldn't load texture blob:..." for embedded
+	// GLB textures. Temporarily disabling createImageBitmap during GLTF loads
+	// forces the stable ImageLoader path without affecting the rest of the app.
+	let _savedCreateImageBitmap = null;
+	function withLegacyGLTFTextureLoading(fn) {
+		const hadImageBitmap = typeof window.createImageBitmap === 'function';
+		if (hadImageBitmap) {
+			_savedCreateImageBitmap = window.createImageBitmap;
+			window.createImageBitmap = undefined;
+		}
+		const restore = () => {
+			if (_savedCreateImageBitmap) {
+				window.createImageBitmap = _savedCreateImageBitmap;
+				_savedCreateImageBitmap = null;
+			}
+		};
+		try {
+			return fn(restore);
+		} catch (err) {
+			restore();
+			throw err;
+		}
+	}
+
 	// ── CHROMA KEY MATERIAL (verbatim from tur.html) ──────────
 	function injectMeshBasicChroma(shader, chromaMapFrag) {
 		shader.fragmentShader = shader.fragmentShader.replace(
@@ -1707,24 +1733,28 @@ uniform float smoothing;`
 				if (personGroup) personGroup.visible = false;
 				setStatus('loading', 'LOADING MODEL...');
 
-				gltfLoader.load(resolveHref(extraModelPath), (gltf) => {
-					if (myGen !== personLoadGen) return;
-					const m = gltf.scene;
-					const box = new THREE.Box3().setFromObject(m);
-					const sz  = box.getSize(new THREE.Vector3());
-					const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
-					const sc  = targetSize / Math.max(sz.x, sz.y, sz.z);
-					placeRootOnFloor(m, sc);
-					m.position.add(worldToOverlayLocal(walkOriginOffset));
-					m.userData.isCompanionModel = true;
-					overlayRoot.add(m);
-					companionMonument = m;
-					finalizeMonument(m);
-				}, undefined, (err) => {
-					if (myGen !== personLoadGen) return;
-					console.warn('Companion model failed:', err);
-					// Reveal what we have (video alone) so the user isn't stuck.
-					finalizeMonument(null);
+				withLegacyGLTFTextureLoading((restoreCreateImageBitmap) => {
+					gltfLoader.load(resolveHref(extraModelPath), (gltf) => {
+						restoreCreateImageBitmap();
+						if (myGen !== personLoadGen) return;
+						const m = gltf.scene;
+						const box = new THREE.Box3().setFromObject(m);
+						const sz  = box.getSize(new THREE.Vector3());
+						const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
+						const sc  = targetSize / Math.max(sz.x, sz.y, sz.z);
+						placeRootOnFloor(m, sc);
+						m.position.add(worldToOverlayLocal(walkOriginOffset));
+						m.userData.isCompanionModel = true;
+						overlayRoot.add(m);
+						companionMonument = m;
+						finalizeMonument(m);
+					}, undefined, (err) => {
+						restoreCreateImageBitmap();
+						if (myGen !== personLoadGen) return;
+						console.warn('Companion model failed:', err);
+						// Reveal what we have (video alone) so the user isn't stuck.
+						finalizeMonument(null);
+					});
 				});
 			} else {
 				finalizeMonument(null);
@@ -1785,30 +1815,34 @@ uniform float smoothing;`
 		loaderOverlay.classList.add('visible');
 		setStatus('loading', 'LOADING...');
 
-		gltfLoader.load(resolveHref(path), (gltf) => {
-			const model  = gltf.scene;
-			const box    = new THREE.Box3().setFromObject(model);
-			const size   = box.getSize(new THREE.Vector3());
-			const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
-			const normScale  = targetSize / Math.max(size.x, size.y, size.z);
+		withLegacyGLTFTextureLoading((restoreCreateImageBitmap) => {
+			gltfLoader.load(resolveHref(path), (gltf) => {
+				restoreCreateImageBitmap();
+				const model  = gltf.scene;
+				const box    = new THREE.Box3().setFromObject(model);
+				const size   = box.getSize(new THREE.Vector3());
+				const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
+				const normScale  = targetSize / Math.max(size.x, size.y, size.z);
 
-			placeRootOnFloor(model, normScale);
-			model.position.add(worldToOverlayLocal(walkOriginOffset));
+				placeRootOnFloor(model, normScale);
+				model.position.add(worldToOverlayLocal(walkOriginOffset));
 
-			overlayRoot.add(model);
-			currentModel = model;
-			currentType  = 'model';
+				overlayRoot.add(model);
+				currentModel = model;
+				currentType  = 'model';
 
-			loaderOverlay.classList.remove('visible');
-			setStatus('ready', name.toUpperCase());
-			nameOverlay.textContent = name;
-			focusPotreeCameraOnObject(model);
-			isLoading = false;
-		}, undefined, (err) => {
-			console.error(err);
-			loaderOverlay.classList.remove('visible');
-			setStatus('error', 'LOAD FAILED');
-			isLoading = false;
+				loaderOverlay.classList.remove('visible');
+				setStatus('ready', name.toUpperCase());
+				nameOverlay.textContent = name;
+				focusPotreeCameraOnObject(model);
+				isLoading = false;
+			}, undefined, (err) => {
+				restoreCreateImageBitmap();
+				console.error(err);
+				loaderOverlay.classList.remove('visible');
+				setStatus('error', 'LOAD FAILED');
+				isLoading = false;
+			});
 		});
 	}
 
