@@ -906,6 +906,30 @@
 	import { GLTFLoader }     from 'three/addons/loaders/GLTFLoader.js';
 	import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
+	// ── BLOB-URL TEXTURE FIX (run once, at module scope) ───────
+	// GLBs with embedded textures are decoded by GLTFLoader → TextureLoader →
+	// ImageLoader → `<img>.src = blob:...`. ImageLoader's default `crossOrigin`
+	// is 'anonymous'; for `blob:` URLs that flips Chrome (with certain
+	// extensions / Vercel-hosted contexts) into a CORS check the blob can't
+	// satisfy, and the load silently errors out as
+	//   `THREE.GLTFLoader: Couldn't load texture blob:...`
+	// resulting in a textureless model. Blobs are same-origin to the document
+	// that minted them and never need CORS, so for `blob:` URLs we drop the
+	// crossOrigin attribute entirely. Patches every ImageLoader the GLTFLoader
+	// internally instantiates per parse.
+	(function patchImageLoaderForBlobUrls() {
+		const proto = THREE.ImageLoader && THREE.ImageLoader.prototype;
+		if (!proto || proto.__blobPatched) return;
+		const origLoad = proto.load;
+		proto.load = function (url, onLoad, onProgress, onError) {
+			if (typeof url === 'string' && url.startsWith('blob:')) {
+				this.crossOrigin = undefined;
+			}
+			return origLoad.call(this, url, onLoad, onProgress, onError);
+		};
+		proto.__blobPatched = true;
+	})();
+
 	/** Resolve ./models/... against this HTML URL */
 	function resolveHref(relPath) {
 		try { return new URL(relPath, import.meta.url).href; }
@@ -979,6 +1003,69 @@
 		} catch (_) {}
 	}
 
+	// ── POTREE CLOUD AUTO-ROTATION ────────────────────────────
+	// Potree's pointcloud is a THREE.Object3D. Its local origin is at the cloud's
+	// octree corner — using `pc.rotation.z` would tumble the cloud around that
+	// corner ("moving in a circle"). Instead we accumulate an angle and apply it
+	// each frame as `T(+P) * R(angle) * T(-P) * M_original`, where P is the
+	// world-space center of the cloud's bounding box. matrixAutoUpdate is turned
+	// off so Potree won't stomp on our matrix.
+	function rotatePotreePointcloudsAroundCenter(angleDelta) {
+		try {
+			const pcs = window.viewer && window.viewer.scene && window.viewer.scene.pointclouds;
+			if (!pcs || !pcs.length) return;
+			const T1 = new THREE.Matrix4();
+			const R  = new THREE.Matrix4();
+			const T2 = new THREE.Matrix4();
+			for (const pc of pcs) {
+				if (!pc.visible) continue;
+				if (!pc.userData._spinInit) {
+					const bbox = pc.boundingBox || (pc.pcoGeometry && pc.pcoGeometry.boundingBox);
+					if (!bbox) continue;
+					pc.updateMatrixWorld(true);
+					const localCenter = new THREE.Vector3();
+					bbox.getCenter(localCenter);
+					const worldCenter = localCenter.applyMatrix4(pc.matrixWorld);
+					pc.userData._spinInit    = true;
+					pc.userData._spinPivot   = worldCenter;
+					pc.userData._spinAngle   = 0;
+					pc.userData._spinBaseMat = pc.matrix.clone();
+					pc.matrixAutoUpdate = false;
+				}
+				pc.userData._spinAngle += angleDelta;
+				const P = pc.userData._spinPivot;
+				T1.makeTranslation(-P.x, -P.y, -P.z);
+				R.makeRotationZ(pc.userData._spinAngle);
+				T2.makeTranslation( P.x,  P.y,  P.z);
+				pc.matrix.copy(pc.userData._spinBaseMat);
+				pc.matrix.premultiply(T1);
+				pc.matrix.premultiply(R);
+				pc.matrix.premultiply(T2);
+				pc.updateMatrixWorld(true);
+			}
+		} catch (_) {}
+	}
+
+	// Restore each pointcloud's original (un-rotated) transform. Called when
+	// re-entering Agriculture so a previously-spun cloud doesn't appear tilted.
+	function resetPotreePointcloudsRotation() {
+		try {
+			const pcs = window.viewer && window.viewer.scene && window.viewer.scene.pointclouds;
+			if (!pcs || !pcs.length) return;
+			for (const pc of pcs) {
+				if (pc.userData._spinBaseMat) {
+					pc.matrix.copy(pc.userData._spinBaseMat);
+					pc.matrixAutoUpdate = true;
+					pc.updateMatrixWorld(true);
+					pc.userData._spinInit = false;
+					pc.userData._spinAngle = 0;
+					delete pc.userData._spinBaseMat;
+					delete pc.userData._spinPivot;
+				}
+			}
+		} catch (_) {}
+	}
+
 	// Keep THREE.Cache ON. With it OFF, GLBs with embedded textures sometimes log
 	// `GLTFLoader: Couldn't load texture blob:...` because the blob URLs the loader
 	// extracts get released between the GLB parse and the HTMLImageElement.src load.
@@ -1045,6 +1132,10 @@
 	let walkProgress = 0;
 	let walkActive   = false;
 	let personLoadGen = 0;
+	/** Reference to the companion GLB attached in Monument mode. The autorotate
+	 *  toggle spins THIS object in place (matches the original Monument behavior
+	 *  the user said worked perfectly), instead of orbiting the camera. */
+	let companionMonument = null;
 
 	/** World-space anchor for the walk path / model placement (Potree pivot). */
 	const walkOriginOffset = new THREE.Vector3();
@@ -1052,6 +1143,11 @@
 	let walkPathScale = 1;
 	/** Auto-computed scene size hint (used for picking initial model scale). */
 	let sceneSizeHint = 1;
+	/** Per-mode multiplier on the video billboard. Monument keeps the original
+	 *  small size that fits the statue; Agriculture needs a much larger plane
+	 *  so the chroma video reads against the wider point cloud surface. */
+	let videoScaleBaseFactor = 0.012;
+	let videoScaleBaseFloor  = 1;
 
 	let selectedPersonVideoFile = 'video1_green_animation_senior.mp4';
 	let personPreviewVideosStarted = false;
@@ -1125,10 +1221,10 @@
 		const s = parseFloat(personVideoScaleInput.value) / 10;
 		personVideoScaleVal.textContent = s.toFixed(1) + '×';
 		if (personGroup) {
-			// World-scale baseline tuned so the chroma plane is clearly visible
-			// against a Potree point cloud. (Was sceneSizeHint * 0.012 — too small;
-			// 0.05 makes the billboard ~4x larger relative to the cloud surface.)
-			const worldScale = s * Math.max(2, sceneSizeHint * 0.05);
+			// Monument: videoScaleBaseFactor = 0.012 (matches the statue scale).
+			// Agriculture: videoScaleBaseFactor = 0.15 (large enough to read
+			// against the full point-cloud surface).
+			const worldScale = s * Math.max(videoScaleBaseFloor, sceneSizeHint * videoScaleBaseFactor);
 			personGroup.scale.setScalar(worldScale);
 		}
 	}
@@ -1226,6 +1322,11 @@
 	const WALK_START_T = findClosestCurveT(walkPath, walkPathAnchor);
 
 	const gltfLoader = new GLTFLoader();
+	// Belt-and-suspenders for the blob-URL texture issue (see top-of-script
+	// patchImageLoaderForBlobUrls). Propagates undefined crossOrigin all the
+	// way down through this loader's internally-created TextureLoader →
+	// ImageLoader chain.
+	gltfLoader.setCrossOrigin(undefined);
 
 	// ── CHROMA KEY MATERIAL (verbatim from tur.html) ──────────
 	function injectMeshBasicChroma(shader, chromaMapFrag) {
@@ -1485,8 +1586,15 @@ uniform float smoothing;`
 	function loadMonument(displayName, extraModelPath) {
 		const myGen = ++personLoadGen;
 		isLoading = true;
+		// Restore the original Monument video size — the Agriculture path may
+		// have bumped these up to read against the larger point cloud.
+		videoScaleBaseFactor = 0.012;
+		videoScaleBaseFloor  = 1;
 		clearScene();
 		syncSceneAnchor();
+		// Cloud is hidden in Monument mode, but reset its rotation so it's
+		// clean if the user switches back to Agriculture later.
+		resetPotreePointcloudsRotation();
 		hidePotreePointclouds();
 		walkControlsEl.classList.remove('visible');
 		setPersonVideoPanelVisible(false);
@@ -1507,6 +1615,7 @@ uniform float smoothing;`
 					m.position.add(worldToOverlayLocal(walkOriginOffset));
 					m.userData.isCompanionModel = true;
 					overlayRoot.add(m);
+					companionMonument = m;
 
 					focusPotreeCameraOnObject(m);
 				}, undefined, (err) => {
@@ -1660,6 +1769,7 @@ uniform float smoothing;`
 			overlayRoot.remove(obj);
 			disposeObject3D(obj);
 		});
+		companionMonument = null;
 
 		// Remove + dispose the active model / person group
 		if (currentModel) {
@@ -1698,6 +1808,12 @@ uniform float smoothing;`
 		if (isLoading) return;
 		const myGen = ++personLoadGen;
 		isLoading = true;
+		// Bigger billboard for Agriculture — the point cloud spans a much wider
+		// area than the Monument statue, so the Monument-scale video would be
+		// invisible against it. Tuned to occupy a meaningful fraction of the
+		// cloud's footprint without overwhelming it.
+		videoScaleBaseFactor = 0.15;
+		videoScaleBaseFloor  = 3;
 
 		// If the cloud is already visible (e.g. fresh page load, or chroma-mode
 		// swap while in Agriculture) we must NOT call fitToScreen() — it would
@@ -1713,6 +1829,10 @@ uniform float smoothing;`
 		setStatus('loading', 'POINT CLOUD...');
 
 		showPotreePointclouds();
+		// Reset any leftover spin from a previous Agriculture session so the
+		// cloud comes back upright (the rotation matrix from autorotate is
+		// persistent across navigation).
+		resetPotreePointcloudsRotation();
 		if (!cloudWasVisible) {
 			try { window.viewer.fitToScreen(); } catch (_) {}
 		}
@@ -1920,28 +2040,20 @@ uniform float smoothing;`
 		requestAnimationFrame(animate);
 		const delta = clock.getDelta();
 
-		// Auto-rotate orbits Potree's camera around the current view pivot in the
-		// world's vertical (Z-up) axis. Works for both Monument (camera circles the
-		// statue) and Agriculture (camera circles the cloud / video). The previous
-		// `currentModel.rotation.y` path required `currentType === 'model'` which
-		// the new menu (Monument/Agriculture) never sets.
+		// Auto-rotate spins the actual subject in place around its vertical axis
+		// (turntable feel), instead of orbiting the camera.
+		//   • Monument: rotate the companion statue's local Y (== world Z after
+		//     overlayRoot's X/2 rotation). This is the original Monument behavior.
+		//   • Agriculture: rotate the Potree pointcloud(s) around their bbox
+		//     centers via direct matrix premultiply, so the cloud spins on its
+		//     axis instead of tumbling around its octree origin (a corner).
 		if (autoRotate) {
-			try {
-				const view = window.viewer.scene.view;
-				if (view && view.getPivot) {
-					const pivot = view.getPivot();
-					if (pivot) {
-						const angle = delta * 0.4;
-						const cosA = Math.cos(angle), sinA = Math.sin(angle);
-						const offX = view.position.x - pivot.x;
-						const offY = view.position.y - pivot.y;
-						view.position.x = pivot.x + offX * cosA - offY * sinA;
-						view.position.y = pivot.y + offX * sinA + offY * cosA;
-						// Keep yaw in sync for any subsequent user input
-						if (typeof view.yaw === 'number') view.yaw -= angle;
-					}
-				}
-			} catch (_) {}
+			const angle = delta * 0.4;
+			if (companionMonument) {
+				companionMonument.rotation.y += angle;
+			} else {
+				rotatePotreePointcloudsAroundCenter(angle);
+			}
 		}
 
 		syncCameraFromPotree();
