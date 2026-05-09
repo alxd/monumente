@@ -921,17 +921,59 @@
 	import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 	// ── BLOB-URL TEXTURE FIX (run once, at module scope) ───────
-	// GLBs with embedded textures are decoded by GLTFLoader → TextureLoader →
-	// ImageLoader → `<img>.src = blob:...`. On certain Chrome / Edge / Vercel
-	// combinations the `<img>` load silently fails for `blob:` URLs and we
-	// see `THREE.GLTFLoader: Couldn't load texture blob:...` and a textureless
-	// model. Two layered fixes:
-	//   (a) ImageLoader: drop `crossOrigin` for blob URLs (cheap, fixes the
-	//       common "anonymous makes blob load fail" case).
-	//   (b) TextureLoader: for blob URLs, completely bypass HTMLImageElement
-	//       and use `fetch` + `createImageBitmap` — ImageBitmap is fully
-	//       supported by THREE for GPU upload, and `fetch` is much more
-	//       reliable than `<img>.src` for blob: schemes.
+	// GLBs embed textures as binary, and GLTFLoader extracts each into a
+	// `blob:` URL it then hands to a loader to decode. The catch:
+	//
+	//   • In Chrome / Edge / modern Firefox, GLTFLoader picks
+	//     `THREE.ImageBitmapLoader` (NOT `TextureLoader`).
+	//   • In Safari / very old browsers it falls back to `THREE.TextureLoader`
+	//     → `THREE.ImageLoader` → `<img>.src = blob:...`.
+	//
+	// On the user's environment (Edge + extensions + Vercel) the ImageBitmap
+	// path silently fails and we see
+	//   `THREE.GLTFLoader: Couldn't load texture blob:...`  ← textureless model.
+	// We patch all three loader classes so that whichever one GLTFLoader picks,
+	// blob URLs are resolved through a known-good `fetch` + `createImageBitmap`
+	// pipeline (with credentials/headers stripped — they're irrelevant for
+	// blob: URLs and trip up some extensions).
+	(function patchImageBitmapLoaderForBlobUrls() {
+		const proto = THREE.ImageBitmapLoader && THREE.ImageBitmapLoader.prototype;
+		if (!proto || proto.__blobPatched) return;
+		const origLoad = proto.load;
+		proto.load = function (url, onLoad, onProgress, onError) {
+			if (typeof url !== 'string' || !url.startsWith('blob:')) {
+				return origLoad.call(this, url, onLoad, onProgress, onError);
+			}
+			const scope = this;
+			if (scope.manager) scope.manager.itemStart(url);
+			fetch(url)
+				.then(r => {
+					if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url);
+					return r.blob();
+				})
+				.then(b => createImageBitmap(b, {
+					imageOrientation: 'none',
+					premultiplyAlpha: 'none',
+					colorSpaceConversion: 'none'
+				}))
+				.then(bitmap => {
+					if (THREE.Cache && typeof THREE.Cache.add === 'function') {
+						THREE.Cache.add(url, bitmap);
+					}
+					if (onLoad) onLoad(bitmap);
+					if (scope.manager) scope.manager.itemEnd(url);
+				})
+				.catch(err => {
+					console.error('ImageBitmap blob load failed:', url, err);
+					if (onError) onError(err);
+					if (scope.manager) {
+						scope.manager.itemError(url);
+						scope.manager.itemEnd(url);
+					}
+				});
+		};
+		proto.__blobPatched = true;
+	})();
 	(function patchImageLoaderForBlobUrls() {
 		const proto = THREE.ImageLoader && THREE.ImageLoader.prototype;
 		if (!proto || proto.__blobPatched) return;
@@ -947,18 +989,19 @@
 	(function patchTextureLoaderForBlobUrls() {
 		const proto = THREE.TextureLoader && THREE.TextureLoader.prototype;
 		if (!proto || proto.__blobPatched) return;
-		if (typeof createImageBitmap !== 'function') return; // Old browsers — fall back to ImageLoader patch.
+		if (typeof createImageBitmap !== 'function') return;
 		const origLoad = proto.load;
 		proto.load = function (url, onLoad, onProgress, onError) {
 			if (typeof url !== 'string' || !url.startsWith('blob:')) {
 				return origLoad.call(this, url, onLoad, onProgress, onError);
 			}
 			const tex = new THREE.Texture();
-			fetch(url, { credentials: 'omit' })
+			fetch(url)
 				.then(r => r.blob())
 				.then(b => createImageBitmap(b, {
 					imageOrientation: 'none',
-					premultiplyAlpha: 'none'
+					premultiplyAlpha: 'none',
+					colorSpaceConversion: 'none'
 				}))
 				.then(bitmap => {
 					tex.image = bitmap;
@@ -1710,6 +1753,9 @@ uniform float smoothing;`
 			setStatus('ready', (displayName || 'MONUMENT').toUpperCase());
 			nameOverlay.textContent = displayName || 'Monument';
 			isLoading = false;
+			// Now that the new model + textures are uploaded, it's safe to
+			// release the previous load's CPU-side ImageBitmap pixels.
+			setTimeout(_flushBitmapCloses, 500);
 		}
 
 		function onVideoPipelineReady() {
@@ -1834,6 +1880,7 @@ uniform float smoothing;`
 			nameOverlay.textContent = name;
 			focusPotreeCameraOnObject(model);
 			isLoading = false;
+			setTimeout(_flushBitmapCloses, 500);
 		}, undefined, (err) => {
 			console.error(err);
 			setLoaderOverlay(false);
@@ -1855,24 +1902,44 @@ uniform float smoothing;`
 		'sheenColorMap', 'sheenRoughnessMap', 'iridescenceMap'
 	];
 
+	// Track ImageBitmaps that came out of disposed materials so we can close()
+	// them (free CPU-side decoded pixels) AFTER the next load has had a chance
+	// to start. Closing inline in disposeMaterial broke the next GLB's textures
+	// — the bitmaps were aliased somewhere; deferring + verifying frees memory
+	// without that race.
+	const _pendingBitmapCloses = [];
+	function _scheduleBitmapClose(img) {
+		if (!img || typeof img.close !== 'function') return;
+		_pendingBitmapCloses.push(img);
+	}
+	function _flushBitmapCloses() {
+		// Fire-and-forget; if anything is wrong calling close on a "shared"
+		// bitmap, browsers no-op rather than throw.
+		while (_pendingBitmapCloses.length) {
+			const img = _pendingBitmapCloses.shift();
+			try { img.close(); } catch (_) {}
+		}
+	}
+
 	function disposeMaterial(m) {
 		if (!m) return;
 		// Dispose every texture slot on the material — but DON'T null the property,
 		// because three.js' renderer reads those refs from its `dispose` event handler.
-		// IMPORTANT: do NOT call `.close()` on the texture's image. ImageBitmap
-		// instances created by the blob-URL TextureLoader patch may be aliased
-		// inside GLTFLoader / renderer internals, and closing them invalidates
-		// any subsequent parse that re-uses the same source image.
 		for (const key of TEXTURE_SLOT_KEYS) {
 			const t = m[key];
 			if (t && typeof t.dispose === 'function') {
+				_scheduleBitmapClose(t.image);
 				try { t.dispose(); } catch (_) {}
 			}
 		}
 		if (m.uniforms) {
 			for (const k of Object.keys(m.uniforms)) {
 				const u = m.uniforms[k];
-				if (u && u.value && typeof u.value.dispose === 'function') {
+				if (!u || !u.value) continue;
+				if (u.value.isTexture) {
+					_scheduleBitmapClose(u.value.image);
+					try { u.value.dispose(); } catch (_) {}
+				} else if (typeof u.value.dispose === 'function') {
 					try { u.value.dispose(); } catch (_) {}
 				}
 			}
@@ -1982,12 +2049,14 @@ uniform float smoothing;`
 			setStatus('ready', (displayName || 'AGRICULTURE').toUpperCase());
 			nameOverlay.textContent = displayName || 'Agriculture';
 			isLoading = false;
+			setTimeout(_flushBitmapCloses, 500);
 		}, () => {
 			// Video failed but the cloud is still up — leave the user with the cloud.
 			setLoaderOverlay(false);
 			setStatus('ready', (displayName || 'AGRICULTURE').toUpperCase());
 			nameOverlay.textContent = displayName || 'Agriculture';
 			isLoading = false;
+			setTimeout(_flushBitmapCloses, 500);
 		});
 	}
 
