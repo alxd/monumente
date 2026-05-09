@@ -2151,8 +2151,6 @@ uniform float smoothing;`
 
 	// ── ANIMATION LOOP ─────────────────────────────────────────
 	const clock = new THREE.Clock();
-	const _billboardAnchor = new THREE.Vector3();
-	const _billboardToCam = new THREE.Vector3();
 
 	function syncCameraFromPotree() {
 		try {
@@ -2199,13 +2197,13 @@ uniform float smoothing;`
 
 			placePersonOnPath();
 
-			// Billboard — plane faces camera in full 3D (yaw + pitch) so tilt follows
-			// orbit, zoom height, etc.; target is Potree world space (same as overlayCamera).
-			const camWorld = overlayCamera.position;
-			personGroup.getWorldPosition(_billboardAnchor);
-			_billboardToCam.subVectors(camWorld, _billboardAnchor);
-			if (_billboardToCam.lengthSq() > 1e-8) {
-				personGroup.lookAt(camWorld.x, camWorld.y, camWorld.z);
+			// Billboard — face camera on horizontal plane only (yaw); stays upright.
+			// Full lookAt() tilted the plane with overlayRoot’s Z-up → world mapping and read as crooked/diagonal.
+			const camLocal = worldToOverlayLocal(overlayCamera.position);
+			const dir = new THREE.Vector3().subVectors(camLocal, personGroup.position);
+			dir.y = 0;
+			if (dir.lengthSq() > 0.0001) {
+				personGroup.rotation.y = Math.atan2(dir.x, dir.z);
 			}
 		}
 
