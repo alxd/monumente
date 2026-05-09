@@ -132,19 +132,19 @@
         text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
       }
       .cat-red {
-        background: linear-gradient(135deg, #00c8ff 0%, #0090b8 100%);
+        background: linear-gradient(135deg, #6b4423 0%, #4a2c16 100%);
       }
       .cat-blue {
-        background: linear-gradient(135deg, #6b9fe8 0%, #4a78c4 100%);
+        background: linear-gradient(135deg, #2c4a6e 0%, #1e3550 100%);
       }
       .cat-green {
-        background: linear-gradient(135deg, #ff6b35 0%, #d94a1a 100%);
+        background: linear-gradient(135deg, #166534 0%, #0f3d22 100%);
       }
       .cat-yellow {
-        background: linear-gradient(135deg, #c084fc 0%, #9333ea 100%);
+        background: linear-gradient(135deg, #5b21b6 0%, #3b0764 100%);
       }
       .cat-cyan {
-        background: linear-gradient(135deg, #2dd4bf 0%, #0d9488 100%);
+        background: linear-gradient(135deg, #c2410c 0%, #7c2d12 100%);
       }
       .filters {
         position: absolute;
@@ -379,7 +379,7 @@
           id: "cetati",
           title: "1. Traseul Cetatilor",
           desc: "Sibiu, Brasov, Sighisoara, Rasnov, Hunedoara",
-          color: "#00c8ff",
+          color: "#5c3d2e",
           className: "cat-red",
           type: "castle",
           route: [
@@ -408,7 +408,7 @@
           id: "manastiri",
           title: "2. Traseul Manastirilor si Bisericilor",
           desc: "Suceava, Voronet, Putna, Humor, Agapia",
-          color: "#6b9fe8",
+          color: "#2c4a6e",
           className: "cat-blue",
           type: "monastery",
           route: [
@@ -434,7 +434,7 @@
           id: "carpati",
           title: "3. Aventura in Carpati",
           desc: "Transfagarasan, Transalpina, Cheile Nerei, Retezat",
-          color: "#ff6b35",
+          color: "#166534",
           className: "cat-green",
           type: "mountain",
           route: [
@@ -495,7 +495,7 @@
           id: "traditii",
           title: "4. Traditii si Folclor Maramures",
           desc: "Sapanta, Sighet, Viseu de Sus, Barsana",
-          color: "#a855f7",
+          color: "#5b21b6",
           className: "cat-yellow",
           type: "mountain",
           route: [
@@ -518,7 +518,7 @@
           id: "delta",
           title: "5. Delta, Mare si Istorie",
           desc: "Delta Dunarii, Tulcea, Constanta, Mangalia",
-          color: "#2dd4bf",
+          color: "#c2410c",
           className: "cat-cyan",
           type: "castle",
           route: [
@@ -555,10 +555,17 @@
         })
       };
 
+      /** Încadrează România (vest extins ușor); padding stânga compensă panoul lateral. */
+      const ROMANIA_BOUNDS = L.latLngBounds(
+        [43.48, 19.95],
+        [48.34, 29.78]
+      );
+      const MAP_PANEL_PAD = [368, 26];
+
       const map = L.map("map", {
         zoomControl: false,
         layers: [baseLayers.attractions]
-      }).setView([45.8, 24.9], 7);
+      }).setView([45.95, 25.18], 6);
       L.control.zoom({ position: "bottomright" }).addTo(map);
 
       const routeLayers = new Map();
@@ -715,7 +722,11 @@
         activeCategory = null;
         document.querySelectorAll(".category").forEach((el) => el.classList.remove("active"));
         applyCategoryStyles();
-        map.setView([45.8, 24.9], 7);
+        map.fitBounds(ROMANIA_BOUNDS, {
+          paddingTopLeft: MAP_PANEL_PAD,
+          paddingBottomRight: [26, 26],
+          maxZoom: 7
+        });
       }
 
       function closeAllPopups() {
@@ -866,7 +877,7 @@
         buildSnappedRoute(cat);
       });
 
-      function setActiveCategory(id) {
+      function setActiveCategory(id, options = {}) {
         activeCategory = id;
         document.querySelectorAll(".category").forEach((el) => {
           el.classList.toggle("active", el.dataset.id === id);
@@ -883,7 +894,21 @@
               ...((selected.branches || []).flat())
             ];
         const bounds = L.latLngBounds(allPoints);
-        map.fitBounds(bounds.pad(0.5));
+        const padded = bounds.pad(0.5);
+        const fitOpts = {
+          paddingTopLeft: MAP_PANEL_PAD,
+          paddingBottomRight: [26, 26],
+          maxZoom: 9
+        };
+        if (options.fly) {
+          map.flyToBounds(padded, {
+            ...fitOpts,
+            duration: 1.55,
+            easeLinearity: 0.22
+          });
+        } else {
+          map.fitBounds(padded, fitOpts);
+        }
       }
 
       function refreshByType() {
@@ -1033,7 +1058,8 @@
       }
 
       renderLegend();
-      setActiveCategory("cetati");
+      resetFullMapView();
+      setTimeout(() => setActiveCategory("cetati", { fly: true }), 900);
     </script>
   </body>
 </html>
