@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Acces platformă — Monumente</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a222d;
+      --border: #2d3a4a;
+      --text: #e8eef4;
+      --muted: #8fa3b8;
+      --accent: #c9a227;
+      --accent-dim: #a68520;
+      --error: #e85d5d;
+      --radius: 12px;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      background: radial-gradient(ellipse 120% 80% at 50% -20%, #1e2a3a 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+    h1 {
+      font-size: 1.65rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.35rem;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin: 0 0 2rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem 1.35rem;
+      margin-bottom: 1.5rem;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    input[type="text"],
+    input[type="email"] {
+      width: 100%;
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #121920;
+      color: var(--text);
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+    input:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+    .terms-box {
+      max-height: 220px;
+      overflow-y: auto;
+      padding: 1rem;
+      background: #121920;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.82rem;
+      color: #b8c5d0;
+      margin-bottom: 1rem;
+    }
+    .terms-box h2 {
+      font-size: 0.95rem;
+      color: var(--text);
+      margin: 0 0 0.75rem;
+    }
+    .terms-box p { margin: 0 0 0.65rem; }
+    .check-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      margin-bottom: 1.25rem;
+      font-size: 0.9rem;
+    }
+    .check-row input { margin-top: 0.2rem; }
+    button[type="submit"] {
+      width: 100%;
+      padding: 0.85rem 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-dim) 100%);
+      color: #1a1508;
+      cursor: pointer;
+    }
+    button[type="submit"]:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .msg-error {
+      color: var(--error);
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .msg-error.visible { display: block; }
+    #portal { display: none; }
+    #portal.visible { display: block; }
+    #gate.hidden { display: none; }
+    .portal-intro {
+      color: var(--muted);
+      margin-bottom: 1.5rem;
+      font-size: 0.95rem;
+    }
+    .links {
+      display: grid;
+      gap: 1rem;
+    }
+    @media (min-width: 560px) {
+      .links { grid-template-columns: 1fr 1fr; }
+    }
+    .link-card {
+      display: block;
+      padding: 1.25rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .link-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(201, 162, 39, 0.25);
+    }
+    .link-card h3 {
+      margin: 0 0 0.5rem;
+      font-size: 1.05rem;
+      color: var(--accent);
+    }
+    .link-card p {
+      margin: 0;
+      font-size: 0.88rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .user-badge {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+    footer {
+      margin-top: 2.5rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Acces la platformă</h1>
+    <p class="subtitle">Completați datele pentru a continua către instrumentele de vizualizare.</p>
+
+    <div id="gate">
+      <div class="card">
+        <p id="form-error" class="msg-error" role="alert"></p>
+        <form id="access-form" novalidate>
+          <label for="name">Nume și prenume</label>
+          <input id="name" name="name" type="text" autocomplete="name" required maxlength="200" />
+
+          <label for="email">Adresă de e-mail</label>
+          <input id="email" name="email" type="email" autocomplete="email" required maxlength="320" />
+
+          <div class="terms-box" tabindex="0" aria-label="Termeni și condiții">
+            <h2>Termeni, confidențialitate și obligații (în sens NDA)</h2>
+            <p>
+              Prin accesarea acestei platforme și bifarea acordului de mai jos, confirmați că ați citit și acceptați integral prevederile următoare, care au caracter obligatoriu și sunt concepute pentru a proteja informațiile, conținutul tehnic și modul de prezentare puse la dispoziție prin intermediul site-ului.
+            </p>
+            <p>
+              <strong>1. Natură confidențială.</strong> Materialele, datele, modelele, vizualizările, hărțile, punctele de interes și orice alt element accesibil prin platformă pot include informații care nu sunt destinate difuzării publice. Le veți trata ca fiind <strong>confidențiale</strong>, cu excepția cazului în care sunt în mod evident deja publice sau vi se comunică altfel în scris.
+            </p>
+            <p>
+              <strong>2. Obligații de nefolosire și nedivulgare.</strong> Vă angajați să nu reproduceți, să nu distribuiți, să nu închiriați, să nu sublicențiați și să nu exploatați comercial conținutul platformei sau părți ale acestuia fără acordul prealabil expres al titularului drepturilor. Nu veți dezvălui terților (inclusiv altor dezvoltatori sau organizații) accesul, structura, fluxurile, codul sursă vizibil în browser sau metodele de integrare, decât dacă legea impune altfel.
+            </p>
+            <p>
+              <strong>3. Utilizare limitată.</strong> Accesul vă este acordat doar în scopul pentru care a fost oferit (consultare, cercetare autorizată, colaborare etc.). Orice altă utilizare este interzisă fără acord scris.
+            </p>
+            <p>
+              <strong>4. Date cu caracter personal.</strong> Numele și adresa de e-mail furnizate la înregistrare sunt prelucrate în scopul gestionării accesului, al comunicărilor legate de platformă și al respectării obligațiilor legale. Nu veți furniza date false și veți menține o adresă de e-mail validă.
+            </p>
+            <p>
+              <strong>5. Securitate.</strong> Veți păstra confidențialitatea linkurilor de acces și veți notifica imediat titularul platformei în cazul în care suspectați un acces neautorizat sau o divulgare nepermisă.
+            </p>
+            <p>
+              <strong>6. Durată.</strong> Obligațiile de confidențialitate și nefolosire rămân în vigoare și după încetarea utilizării platformei, atât timp cât informațiile nu au intrat legitim în domeniul public fără încălcarea acestui acord.
+            </p>
+            <p>
+              <strong>7. Remedii.</strong> Încălcarea acestor obligații poate atrage răspunderea civilă și, acolo unde este cazul, penală, conform legii aplicabile.
+            </p>
+            <p>
+              Dacă nu sunteți de acord cu acești termeni, nu utilizați platforma și nu continuați înregistrarea.
+            </p>
+          </div>
+
+          <div class="check-row">
+            <input type="checkbox" id="terms" name="terms" required />
+            <label for="terms" style="margin:0;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text);font-size:0.9rem;">
+              Am citit și accept integral termenii, obligațiile de confidențialitate și condițiile de mai sus (inclusiv în sens de angajament de tip NDA).
+            </label>
+          </div>
+
+          <button type="submit" id="submit-btn">Continuă</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="portal">
+      <p class="user-badge" id="welcome-line"></p>
+      <p class="portal-intro">
+        Selectați modulul dorit. Ambele instrumente sunt optimizate pentru explorarea patrimoniului și a datelor spațiale asociate.
+      </p>
+      <div class="links">
+        <a class="link-card" href="/examples/map.html">
+          <h3>Hartă interactivă România</h3>
+          <p>
+            Explorare geografică la nivel național: navigare fluidă pe straturi cartografice, identificare spațială a obiectivelor și contextualizare teritorială într-o interfață concepută pentru claritate și precizie în analiză.
+          </p>
+        </a>
+        <a class="link-card" href="/examples/viewer.html">
+          <h3>3D Viewer</h3>
+          <p>
+            Vizualizare tridimensională avansată a norilor de puncte și a scenelor 3D: manipulare a camerei, măsurători, inspecție detaliată și flux de lucru profesional pentru documentare și studiu geometric.
+          </p>
+        </a>
+      </div>
+    </div>
+
+    <footer>Acces securizat — utilizați conținutul numai conform termenilor acceptați.</footer>
+  </div>
+
+  <script>
+    (function () {
+      var COOKIE = 'monumente_acces_v1';
+      var MAX_AGE = 180 * 24 * 60 * 60;
+
+      function getCookie(name) {
+        var m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&') + '=([^;]*)'));
+        return m ? decodeURIComponent(m[1]) : null;
+      }
+
+      function setCookie(name, value, maxAgeSec) {
+        var secure = location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = name + '=' + encodeURIComponent(value) + '; Path=/; Max-Age=' + maxAgeSec + '; SameSite=Lax' + secure;
+      }
+
+      function parseStored() {
+        var raw = getCookie(COOKIE);
+        if (!raw) return null;
+        try {
+          var o = JSON.parse(raw);
+          if (o && typeof o.n === 'string' && typeof o.e === 'string' && o.n.trim() && o.e.trim()) return o;
+        } catch (e) {}
+        return null;
+      }
+
+      function showPortal(data) {
+        document.getElementById('gate').classList.add('hidden');
+        document.getElementById('portal').classList.add('visible');
+        document.getElementById('welcome-line').textContent =
+          'Sesiune activă: ' + data.n + ' (' + data.e + ')';
+      }
+
+      function showFormError(msg) {
+        var el = document.getElementById('form-error');
+        el.textContent = msg || '';
+        el.classList.toggle('visible', !!msg);
+      }
+
+      var existing = parseStored();
+      if (existing) {
+        showPortal(existing);
+      }
+
+      document.getElementById('access-form').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        showFormError('');
+
+        var name = document.getElementById('name').value.trim();
+        var email = document.getElementById('email').value.trim();
+        var terms = document.getElementById('terms').checked;
+        var btn = document.getElementById('submit-btn');
+
+        if (!name || !email) {
+          showFormError('Completați numele și adresa de e-mail.');
+          return;
+        }
+        if (!terms) {
+          showFormError('Trebuie să acceptați termenii și condițiile pentru a continua.');
+          return;
+        }
+
+        btn.disabled = true;
+        fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, email: email }),
+        })
+          .then(function (r) {
+            return r.text().then(function (text) {
+              var j = {};
+              try {
+                j = text ? JSON.parse(text) : {};
+              } catch (e) {}
+              return { ok: r.ok, status: r.status, body: j };
+            });
+          })
+          .then(function (res) {
+            if (!res.ok) {
+              showFormError(res.body.error || 'Înregistrarea a eșuat. Încercați din nou sau contactați administratorul.');
+              return;
+            }
+            var payload = JSON.stringify({ n: name, e: email, t: Date.now() });
+            setCookie(COOKIE, payload, MAX_AGE);
+            showPortal({ n: name, e: email });
+          })
+          .catch(function () {
+            showFormError('Eroare de rețea. Verificați conexiunea și încercați din nou.');
+          })
+          .finally(function () {
+            btn.disabled = false;
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
