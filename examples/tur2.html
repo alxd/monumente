@@ -936,6 +936,70 @@
 	// blob URLs are resolved through a known-good `fetch` + `createImageBitmap`
 	// pipeline (with credentials/headers stripped — they're irrelevant for
 	// blob: URLs and trip up some extensions).
+	// Multi-method blob loader. `fetch(blob:)` fails with `TypeError: Failed
+	// to fetch` on this user's environment — almost certainly a service worker
+	// or browser extension intercepting fetch. We try, in order:
+	//   1. XHR with responseType=blob   → bypasses fetch interception entirely
+	//   2. fetch                         → covers anything XHR misses
+	//   3. <img> element + createImageBitmap → last-resort, doesn't need blob bytes
+	// The first one that succeeds wins. All three are async/Promise-based.
+	function loadBlobAsImageBitmap(url) {
+		const opts = {
+			imageOrientation: 'none',
+			premultiplyAlpha: 'none',
+			colorSpaceConversion: 'none'
+		};
+		const tryXhr = () => new Promise((resolve, reject) => {
+			try {
+				const xhr = new XMLHttpRequest();
+				xhr.open('GET', url, true);
+				xhr.responseType = 'blob';
+				xhr.onload = () => {
+					if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) {
+						if (xhr.response && xhr.response.size > 0) resolve(xhr.response);
+						else reject(new Error('XHR returned empty blob for ' + url));
+					} else {
+						reject(new Error('XHR ' + xhr.status + ' for ' + url));
+					}
+				};
+				xhr.onerror = () => reject(new Error('XHR network error for ' + url));
+				xhr.send();
+			} catch (e) { reject(e); }
+		}).then(b => createImageBitmap(b, opts));
+
+		const tryFetch = () => fetch(url)
+			.then(r => {
+				if (!r.ok && r.status !== 0) throw new Error('HTTP ' + r.status);
+				return r.blob();
+			})
+			.then(b => createImageBitmap(b, opts));
+
+		const tryImg = () => new Promise((resolve, reject) => {
+			const img = new Image();
+			// No crossOrigin attribute — blob: URLs are same-origin, and setting
+			// crossOrigin makes some browsers/extensions reject blob loads.
+			img.onload = () => {
+				if (typeof createImageBitmap === 'function') {
+					createImageBitmap(img, opts).then(resolve, () => resolve(img));
+				} else {
+					resolve(img);
+				}
+			};
+			img.onerror = (e) => reject(new Error('Image load error for ' + url));
+			img.src = url;
+		});
+
+		return tryXhr()
+			.catch(e1 => {
+				console.warn('Blob via XHR failed, trying fetch:', e1 && e1.message);
+				return tryFetch();
+			})
+			.catch(e2 => {
+				console.warn('Blob via fetch failed, trying <img>:', e2 && e2.message);
+				return tryImg();
+			});
+	}
+
 	(function patchImageBitmapLoaderForBlobUrls() {
 		const proto = THREE.ImageBitmapLoader && THREE.ImageBitmapLoader.prototype;
 		if (!proto || proto.__blobPatched) return;
@@ -946,16 +1010,7 @@
 			}
 			const scope = this;
 			if (scope.manager) scope.manager.itemStart(url);
-			fetch(url)
-				.then(r => {
-					if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url);
-					return r.blob();
-				})
-				.then(b => createImageBitmap(b, {
-					imageOrientation: 'none',
-					premultiplyAlpha: 'none',
-					colorSpaceConversion: 'none'
-				}))
+			loadBlobAsImageBitmap(url)
 				.then(bitmap => {
 					if (THREE.Cache && typeof THREE.Cache.add === 'function') {
 						THREE.Cache.add(url, bitmap);
@@ -964,7 +1019,7 @@
 					if (scope.manager) scope.manager.itemEnd(url);
 				})
 				.catch(err => {
-					console.error('ImageBitmap blob load failed:', url, err);
+					console.error('ImageBitmap blob load failed (all methods):', url, err);
 					if (onError) onError(err);
 					if (scope.manager) {
 						scope.manager.itemError(url);
@@ -996,20 +1051,14 @@
 				return origLoad.call(this, url, onLoad, onProgress, onError);
 			}
 			const tex = new THREE.Texture();
-			fetch(url)
-				.then(r => r.blob())
-				.then(b => createImageBitmap(b, {
-					imageOrientation: 'none',
-					premultiplyAlpha: 'none',
-					colorSpaceConversion: 'none'
-				}))
+			loadBlobAsImageBitmap(url)
 				.then(bitmap => {
 					tex.image = bitmap;
 					tex.needsUpdate = true;
 					if (onLoad) onLoad(tex);
 				})
 				.catch(err => {
-					console.error('Blob texture load failed:', url, err);
+					console.error('Blob texture load failed (all methods):', url, err);
 					if (onError) onError(err);
 				});
 			return tex;
