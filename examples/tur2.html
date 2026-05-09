@@ -660,23 +660,7 @@
 		}
 		#loader-overlay.visible { opacity: 1; }
 
-		/* 3D wireframe icon — only while a GLB is loading (Monument / pure model) */
-		#loader-overlay .loader-3d { display: none; }
-		#loader-overlay.loader-show-model-icon .loader-3d { display: block; margin: 0 auto 14px; }
-
-		.loader-inner { text-align: center; perspective: 140px; }
-		/* Wireframe “3D model” cue while GLB loads */
-		.loader-3d {
-			width: 44px; height: 44px;
-			margin: 0 auto 14px;
-			color: var(--accent);
-			animation: loader-3d-spin 2.2s linear infinite;
-		}
-		.loader-3d svg { display: block; width: 100%; height: 100%; }
-		@keyframes loader-3d-spin {
-			0%   { transform: rotateX(-18deg) rotateY(0deg); }
-			100% { transform: rotateX(-18deg) rotateY(360deg); }
-		}
+		.loader-inner { text-align: center; }
 		.loader-ring {
 			width: 48px; height: 48px;
 			border: 2px solid var(--border);
@@ -850,16 +834,8 @@
 	<!-- Loading overlay (for GLB / video loads, not point cloud) -->
 	<div id="loader-overlay">
 		<div class="loader-inner">
-			<div class="loader-3d" aria-hidden="true" title="Loading 3D model">
-				<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
-					<path d="M32 8 L54 22 L54 42 L32 56 L10 42 L10 22 Z"/>
-					<path d="M10 22 L32 36 L54 22"/>
-					<path d="M32 8 L32 36"/>
-					<path d="M32 36 L32 56"/>
-				</svg>
-			</div>
 			<div class="loader-ring"></div>
-			<div class="loader-text" id="loader-overlay-text">LOADING</div>
+			<div class="loader-text">LOADING</div>
 		</div>
 	</div>
 
@@ -921,114 +897,17 @@
 	import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 	// ── BLOB-URL TEXTURE FIX (run once, at module scope) ───────
-	// GLBs embed textures as binary, and GLTFLoader extracts each into a
-	// `blob:` URL it then hands to a loader to decode. The catch:
-	//
-	//   • In Chrome / Edge / modern Firefox, GLTFLoader picks
-	//     `THREE.ImageBitmapLoader` (NOT `TextureLoader`).
-	//   • In Safari / very old browsers it falls back to `THREE.TextureLoader`
-	//     → `THREE.ImageLoader` → `<img>.src = blob:...`.
-	//
-	// On the user's environment (Edge + extensions + Vercel) the ImageBitmap
-	// path silently fails and we see
-	//   `THREE.GLTFLoader: Couldn't load texture blob:...`  ← textureless model.
-	// We patch all three loader classes so that whichever one GLTFLoader picks,
-	// blob URLs are resolved through a known-good `fetch` + `createImageBitmap`
-	// pipeline (with credentials/headers stripped — they're irrelevant for
-	// blob: URLs and trip up some extensions).
-	// Multi-method blob loader. `fetch(blob:)` fails with `TypeError: Failed
-	// to fetch` on this user's environment — almost certainly a service worker
-	// or browser extension intercepting fetch. We try, in order:
-	//   1. XHR with responseType=blob   → bypasses fetch interception entirely
-	//   2. fetch                         → covers anything XHR misses
-	//   3. <img> element + createImageBitmap → last-resort, doesn't need blob bytes
-	// The first one that succeeds wins. All three are async/Promise-based.
-	function loadBlobAsImageBitmap(url) {
-		const opts = {
-			imageOrientation: 'none',
-			premultiplyAlpha: 'none',
-			colorSpaceConversion: 'none'
-		};
-		const tryXhr = () => new Promise((resolve, reject) => {
-			try {
-				const xhr = new XMLHttpRequest();
-				xhr.open('GET', url, true);
-				xhr.responseType = 'blob';
-				xhr.onload = () => {
-					if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) {
-						if (xhr.response && xhr.response.size > 0) resolve(xhr.response);
-						else reject(new Error('XHR returned empty blob for ' + url));
-					} else {
-						reject(new Error('XHR ' + xhr.status + ' for ' + url));
-					}
-				};
-				xhr.onerror = () => reject(new Error('XHR network error for ' + url));
-				xhr.send();
-			} catch (e) { reject(e); }
-		}).then(b => createImageBitmap(b, opts));
-
-		const tryFetch = () => fetch(url)
-			.then(r => {
-				if (!r.ok && r.status !== 0) throw new Error('HTTP ' + r.status);
-				return r.blob();
-			})
-			.then(b => createImageBitmap(b, opts));
-
-		const tryImg = () => new Promise((resolve, reject) => {
-			const img = new Image();
-			// No crossOrigin attribute — blob: URLs are same-origin, and setting
-			// crossOrigin makes some browsers/extensions reject blob loads.
-			img.onload = () => {
-				if (typeof createImageBitmap === 'function') {
-					createImageBitmap(img, opts).then(resolve, () => resolve(img));
-				} else {
-					resolve(img);
-				}
-			};
-			img.onerror = (e) => reject(new Error('Image load error for ' + url));
-			img.src = url;
-		});
-
-		return tryXhr()
-			.catch(e1 => {
-				console.warn('Blob via XHR failed, trying fetch:', e1 && e1.message);
-				return tryFetch();
-			})
-			.catch(e2 => {
-				console.warn('Blob via fetch failed, trying <img>:', e2 && e2.message);
-				return tryImg();
-			});
-	}
-
-	(function patchImageBitmapLoaderForBlobUrls() {
-		const proto = THREE.ImageBitmapLoader && THREE.ImageBitmapLoader.prototype;
-		if (!proto || proto.__blobPatched) return;
-		const origLoad = proto.load;
-		proto.load = function (url, onLoad, onProgress, onError) {
-			if (typeof url !== 'string' || !url.startsWith('blob:')) {
-				return origLoad.call(this, url, onLoad, onProgress, onError);
-			}
-			const scope = this;
-			if (scope.manager) scope.manager.itemStart(url);
-			loadBlobAsImageBitmap(url)
-				.then(bitmap => {
-					if (THREE.Cache && typeof THREE.Cache.add === 'function') {
-						THREE.Cache.add(url, bitmap);
-					}
-					if (onLoad) onLoad(bitmap);
-					if (scope.manager) scope.manager.itemEnd(url);
-				})
-				.catch(err => {
-					console.error('ImageBitmap blob load failed (all methods):', url, err);
-					if (onError) onError(err);
-					if (scope.manager) {
-						scope.manager.itemError(url);
-						scope.manager.itemEnd(url);
-					}
-				});
-		};
-		proto.__blobPatched = true;
-	})();
+	// GLBs with embedded textures are decoded by GLTFLoader → TextureLoader →
+	// ImageLoader → `<img>.src = blob:...`. On certain Chrome / Edge / Vercel
+	// combinations the `<img>` load silently fails for `blob:` URLs and we
+	// see `THREE.GLTFLoader: Couldn't load texture blob:...` and a textureless
+	// model. Two layered fixes:
+	//   (a) ImageLoader: drop `crossOrigin` for blob URLs (cheap, fixes the
+	//       common "anonymous makes blob load fail" case).
+	//   (b) TextureLoader: for blob URLs, completely bypass HTMLImageElement
+	//       and use `fetch` + `createImageBitmap` — ImageBitmap is fully
+	//       supported by THREE for GPU upload, and `fetch` is much more
+	//       reliable than `<img>.src` for blob: schemes.
 	(function patchImageLoaderForBlobUrls() {
 		const proto = THREE.ImageLoader && THREE.ImageLoader.prototype;
 		if (!proto || proto.__blobPatched) return;
@@ -1044,21 +923,26 @@
 	(function patchTextureLoaderForBlobUrls() {
 		const proto = THREE.TextureLoader && THREE.TextureLoader.prototype;
 		if (!proto || proto.__blobPatched) return;
-		if (typeof createImageBitmap !== 'function') return;
+		if (typeof createImageBitmap !== 'function') return; // Old browsers — fall back to ImageLoader patch.
 		const origLoad = proto.load;
 		proto.load = function (url, onLoad, onProgress, onError) {
 			if (typeof url !== 'string' || !url.startsWith('blob:')) {
 				return origLoad.call(this, url, onLoad, onProgress, onError);
 			}
 			const tex = new THREE.Texture();
-			loadBlobAsImageBitmap(url)
+			fetch(url, { credentials: 'omit' })
+				.then(r => r.blob())
+				.then(b => createImageBitmap(b, {
+					imageOrientation: 'none',
+					premultiplyAlpha: 'none'
+				}))
 				.then(bitmap => {
 					tex.image = bitmap;
 					tex.needsUpdate = true;
 					if (onLoad) onLoad(tex);
 				})
 				.catch(err => {
-					console.error('Blob texture load failed (all methods):', url, err);
+					console.error('Blob texture load failed:', url, err);
 					if (onError) onError(err);
 				});
 			return tex;
@@ -1255,8 +1139,7 @@
 	overlayRoot.add(rim);
 
 	// ── DOM REFS ───────────────────────────────────────────────
-	const loaderOverlay     = document.getElementById('loader-overlay');
-	const loaderOverlayText = document.getElementById('loader-overlay-text');
+	const loaderOverlay  = document.getElementById('loader-overlay');
 	const statusEl       = document.getElementById('status');
 	const statusText     = document.getElementById('status-text');
 	const nameOverlay    = document.getElementById('model-name-overlay');
@@ -1276,15 +1159,6 @@
 	const audioBtn      = document.getElementById('audio-btn');
 	const audioStatusEl = document.getElementById('audio-status');
 	const audioVolInput = document.getElementById('audio-vol');
-
-	function setLoaderOverlay(visible, message, opts) {
-		const o = opts || {};
-		if (loaderOverlayText != null && message != null) {
-			loaderOverlayText.textContent = message;
-		}
-		loaderOverlay.classList.toggle('visible', !!visible);
-		loaderOverlay.classList.toggle('loader-show-model-icon', !!o.showModelIcon);
-	}
 
 	// ── STATE ──────────────────────────────────────────────────
 	let currentModel = null;
@@ -1778,87 +1652,80 @@ uniform float smoothing;`
 		videoEl.load();
 	}
 
-	// ── LOAD MONUMENT (GLB first — no video until statue is in the scene) ───
-	// Hides the point cloud, loads the companion statue, THEN starts the chroma
-	// video pipeline so the billboard never appears over an empty pedestal.
+	// ── LOAD MONUMENT (chroma video billboard + statue GLB) ────
+	// Hides the point cloud, drops the statue at the cloud pivot, and orbits the
+	// video plane around it. Camera focuses on the statue (not the video) so user
+	// rotation pivots on the statue instead of the moving billboard.
 	function loadMonument(displayName, extraModelPath) {
 		const myGen = ++personLoadGen;
 		isLoading = true;
+		// Restore the original Monument video size — the Agriculture path may
+		// have bumped these up to read against the larger point cloud.
 		videoScaleBaseFactor = 0.012;
 		videoScaleBaseFloor  = 1;
 		clearScene();
 		syncSceneAnchor();
+		// Cloud is hidden in Monument mode, but reset its rotation so it's
+		// clean if the user switches back to Agriculture later.
 		resetPotreePointcloudsRotation();
 		hidePotreePointclouds();
 		walkControlsEl.classList.remove('visible');
 		setPersonVideoPanelVisible(false);
 		setPersonChromaPanelVisible(false);
+		loaderOverlay.classList.add('visible');
+		setStatus('loading', extraModelPath ? 'LOADING MODEL...' : 'LOADING VIDEO...');
 
-		function finishMonumentUI() {
+		// Reveal the now-loaded video + companion + controls in one go. Called
+		// after BOTH the chroma video and the companion GLB are ready (or the
+		// GLB has decisively failed). Keeps the user on the spinner the entire
+		// time so they never see a half-loaded scene (video alone for the
+		// 1-2 seconds before the statue arrives).
+		const finalizeMonument = (companionObj) => {
+			if (myGen !== personLoadGen) return;
+			if (personGroup) personGroup.visible = !videoHidden;
 			walkControlsEl.classList.add('visible');
 			setPersonVideoPanelVisible(true);
 			setPersonChromaPanelVisible(true);
-			setLoaderOverlay(false);
+			loaderOverlay.classList.remove('visible');
 			setStatus('ready', (displayName || 'MONUMENT').toUpperCase());
 			nameOverlay.textContent = displayName || 'Monument';
 			isLoading = false;
-			// Now that the new model + textures are uploaded, it's safe to
-			// release the previous load's CPU-side ImageBitmap pixels.
-			setTimeout(_flushBitmapCloses, 500);
-		}
+			focusPotreeCameraOnObject(companionObj || personGroup);
+		};
 
-		function onVideoPipelineReady() {
-			if (myGen !== personLoadGen) return;
-			if (!companionMonument) focusPotreeCameraOnObject(personGroup);
-			finishMonumentUI();
-		}
+		setupVideoPipeline(myGen, () => {
+			if (extraModelPath) {
+				// Hide the freshly-built video plane until the GLB statue lands.
+				if (personGroup) personGroup.visible = false;
+				setStatus('loading', 'LOADING MODEL...');
 
-		function onVideoPipelineError() {
-			if (myGen !== personLoadGen) return;
-			setLoaderOverlay(false);
+				gltfLoader.load(resolveHref(extraModelPath), (gltf) => {
+					if (myGen !== personLoadGen) return;
+					const m = gltf.scene;
+					const box = new THREE.Box3().setFromObject(m);
+					const sz  = box.getSize(new THREE.Vector3());
+					const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
+					const sc  = targetSize / Math.max(sz.x, sz.y, sz.z);
+					placeRootOnFloor(m, sc);
+					m.position.add(worldToOverlayLocal(walkOriginOffset));
+					m.userData.isCompanionModel = true;
+					overlayRoot.add(m);
+					companionMonument = m;
+					finalizeMonument(m);
+				}, undefined, (err) => {
+					if (myGen !== personLoadGen) return;
+					console.warn('Companion model failed:', err);
+					// Reveal what we have (video alone) so the user isn't stuck.
+					finalizeMonument(null);
+				});
+			} else {
+				finalizeMonument(null);
+			}
+		}, () => {
+			loaderOverlay.classList.remove('visible');
 			setStatus('error', 'VIDEO LOAD FAILED');
 			isLoading = false;
-		}
-
-		function startVideoAfterModel() {
-			if (myGen !== personLoadGen) return;
-			setStatus('loading', 'LOADING VIDEO');
-			setLoaderOverlay(true, 'LOADING VIDEO', { showModelIcon: false });
-			setupVideoPipeline(myGen, onVideoPipelineReady, onVideoPipelineError);
-		}
-
-		if (extraModelPath) {
-			setStatus('loading', 'LOADING MODEL');
-			setLoaderOverlay(true, 'LOADING MODEL', { showModelIcon: true });
-			gltfLoader.load(resolveHref(extraModelPath), (gltf) => {
-				if (myGen !== personLoadGen) return;
-				const m = gltf.scene;
-				const box = new THREE.Box3().setFromObject(m);
-				const sz  = box.getSize(new THREE.Vector3());
-				const targetSize = Math.max(2.5, sceneSizeHint * 0.04);
-				const sc  = targetSize / Math.max(sz.x, sz.y, sz.z);
-				placeRootOnFloor(m, sc);
-				m.position.add(worldToOverlayLocal(walkOriginOffset));
-				m.userData.isCompanionModel = true;
-				overlayRoot.add(m);
-				companionMonument = m;
-				focusPotreeCameraOnObject(m);
-				startVideoAfterModel();
-			}, undefined, (err) => {
-				console.warn('Companion model failed:', err);
-				if (myGen !== personLoadGen) return;
-				companionMonument = null;
-				startVideoAfterModel();
-			});
-		} else {
-			setStatus('loading', 'LOADING VIDEO');
-			setLoaderOverlay(true, 'LOADING VIDEO', { showModelIcon: false });
-			setupVideoPipeline(myGen, () => {
-				if (myGen !== personLoadGen) return;
-				focusPotreeCameraOnObject(personGroup);
-				finishMonumentUI();
-			}, onVideoPipelineError);
-		}
+		});
 	}
 
 	function placePersonOnPath() {
@@ -1907,8 +1774,8 @@ uniform float smoothing;`
 		walkControlsEl.classList.remove('visible');
 		setPersonVideoPanelVisible(false);
 		setPersonChromaPanelVisible(false);
-		setLoaderOverlay(true, 'LOADING MODEL', { showModelIcon: true });
-		setStatus('loading', 'LOADING MODEL');
+		loaderOverlay.classList.add('visible');
+		setStatus('loading', 'LOADING...');
 
 		gltfLoader.load(resolveHref(path), (gltf) => {
 			const model  = gltf.scene;
@@ -1924,15 +1791,14 @@ uniform float smoothing;`
 			currentModel = model;
 			currentType  = 'model';
 
-			setLoaderOverlay(false);
+			loaderOverlay.classList.remove('visible');
 			setStatus('ready', name.toUpperCase());
 			nameOverlay.textContent = name;
 			focusPotreeCameraOnObject(model);
 			isLoading = false;
-			setTimeout(_flushBitmapCloses, 500);
 		}, undefined, (err) => {
 			console.error(err);
-			setLoaderOverlay(false);
+			loaderOverlay.classList.remove('visible');
 			setStatus('error', 'LOAD FAILED');
 			isLoading = false;
 		});
@@ -1951,25 +1817,6 @@ uniform float smoothing;`
 		'sheenColorMap', 'sheenRoughnessMap', 'iridescenceMap'
 	];
 
-	// Track ImageBitmaps that came out of disposed materials so we can close()
-	// them (free CPU-side decoded pixels) AFTER the next load has had a chance
-	// to start. Closing inline in disposeMaterial broke the next GLB's textures
-	// — the bitmaps were aliased somewhere; deferring + verifying frees memory
-	// without that race.
-	const _pendingBitmapCloses = [];
-	function _scheduleBitmapClose(img) {
-		if (!img || typeof img.close !== 'function') return;
-		_pendingBitmapCloses.push(img);
-	}
-	function _flushBitmapCloses() {
-		// Fire-and-forget; if anything is wrong calling close on a "shared"
-		// bitmap, browsers no-op rather than throw.
-		while (_pendingBitmapCloses.length) {
-			const img = _pendingBitmapCloses.shift();
-			try { img.close(); } catch (_) {}
-		}
-	}
-
 	function disposeMaterial(m) {
 		if (!m) return;
 		// Dispose every texture slot on the material — but DON'T null the property,
@@ -1977,18 +1824,13 @@ uniform float smoothing;`
 		for (const key of TEXTURE_SLOT_KEYS) {
 			const t = m[key];
 			if (t && typeof t.dispose === 'function') {
-				_scheduleBitmapClose(t.image);
 				try { t.dispose(); } catch (_) {}
 			}
 		}
 		if (m.uniforms) {
 			for (const k of Object.keys(m.uniforms)) {
 				const u = m.uniforms[k];
-				if (!u || !u.value) continue;
-				if (u.value.isTexture) {
-					_scheduleBitmapClose(u.value.image);
-					try { u.value.dispose(); } catch (_) {}
-				} else if (typeof u.value.dispose === 'function') {
+				if (u && u.value && typeof u.value.dispose === 'function') {
 					try { u.value.dispose(); } catch (_) {}
 				}
 			}
@@ -2017,13 +1859,14 @@ uniform float smoothing;`
 		});
 		companionMonument = null;
 
-		// Remove + dispose the active model / person group (video plane + chroma mat + VideoTexture)
+		// Remove + dispose the active model / person group
 		if (currentModel) {
 			overlayRoot.remove(currentModel);
 			disposeObject3D(currentModel);
 			currentModel = null;
 		}
 
+		// Tear down chroma-key video pipeline
 		videoTex = null;
 		if (videoEl) {
 			try {
@@ -2037,11 +1880,7 @@ uniform float smoothing;`
 		personMesh  = null;
 		currentType = null;
 
-		// Drop renderer-side caches so freed textures actually leave the GPU.
-		// NOTE: we deliberately do NOT call `THREE.Cache.clear()` here — the
-		// blob-URL aware TextureLoader patch and GLTFLoader rely on the cache
-		// being warm to resolve embedded GLB textures, and clearing it on every
-		// model swap reproducibly broke texture loading on the next click.
+		// Drop renderer-side caches so freed textures actually leave the GPU
 		try { overlayRenderer.renderLists.dispose(); } catch (_) {}
 
 		stopAudio();
@@ -2074,8 +1913,8 @@ uniform float smoothing;`
 		walkControlsEl.classList.remove('visible');
 		setPersonVideoPanelVisible(false);
 		setPersonChromaPanelVisible(false);
-		setLoaderOverlay(true, 'LOADING VIDEO', { showModelIcon: false });
-		setStatus('loading', 'LOADING VIDEO');
+		loaderOverlay.classList.add('visible');
+		setStatus('loading', 'POINT CLOUD...');
 
 		showPotreePointclouds();
 		// Reset any leftover spin from a previous Agriculture session so the
@@ -2094,18 +1933,16 @@ uniform float smoothing;`
 			walkControlsEl.classList.add('visible');
 			setPersonVideoPanelVisible(true);
 			setPersonChromaPanelVisible(true);
-			setLoaderOverlay(false);
+			loaderOverlay.classList.remove('visible');
 			setStatus('ready', (displayName || 'AGRICULTURE').toUpperCase());
 			nameOverlay.textContent = displayName || 'Agriculture';
 			isLoading = false;
-			setTimeout(_flushBitmapCloses, 500);
 		}, () => {
 			// Video failed but the cloud is still up — leave the user with the cloud.
-			setLoaderOverlay(false);
+			loaderOverlay.classList.remove('visible');
 			setStatus('ready', (displayName || 'AGRICULTURE').toUpperCase());
 			nameOverlay.textContent = displayName || 'Agriculture';
 			isLoading = false;
-			setTimeout(_flushBitmapCloses, 500);
 		});
 	}
 
