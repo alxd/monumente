@@ -361,9 +361,9 @@
 		#person-chroma-panel {
 			display: none;
 			visibility: visible;
-			padding: 14px 14px 14px;
-			margin: 12px 0 14px;
-			border-radius: 8px;
+			padding: 6px 10px 7px;
+			margin: 8px 0 10px;
+			border-radius: 6px;
 			border: 1px solid rgba(0, 200, 255, 0.35);
 			background: rgba(0, 200, 255, 0.07);
 			box-shadow: inset 0 0 0 1px rgba(0, 200, 255, 0.08);
@@ -372,11 +372,11 @@
 
 		#person-chroma-panel .chroma-panel-title {
 			font-family: 'Share Tech Mono', monospace;
-			font-size: 10px;
-			letter-spacing: 2.5px;
+			font-size: 9px;
+			letter-spacing: 2px;
 			color: var(--accent);
 			text-transform: uppercase;
-			margin-bottom: 10px;
+			margin-bottom: 5px;
 		}
 
 		#person-video-panel {
@@ -461,7 +461,7 @@
 
 		.chroma-mode-buttons {
 			display: flex;
-			gap: 8px;
+			gap: 5px;
 			flex-wrap: nowrap;
 			margin-top: 0;
 		}
@@ -469,14 +469,14 @@
 		.chroma-mode-btn {
 			flex: 1 1 0;
 			min-width: 0;
-			min-height: 42px;
-			padding: 8px 6px;
-			border-radius: 6px;
+			min-height: 22px;
+			padding: 3px 4px;
+			border-radius: 4px;
 			border: 1px solid rgba(255, 255, 255, 0.18);
 			background: #131920;
 			color: #e8eef5;
 			font-family: 'Rajdhani', sans-serif;
-			font-size: 12px;
+			font-size: 11px;
 			font-weight: 700;
 			letter-spacing: 0.3px;
 			cursor: pointer;
@@ -496,10 +496,11 @@
 
 		#model-scale-row input[type=range] { accent-color: var(--accent); }
 
-		/* ── Hide / show video toggle (lives inside the video panel) ── */
+		/* ── Hide / show video toggle (sits right under Auto Rotate) ── */
 		.hide-video-btn {
+			display: none;
 			width: 100%;
-			margin-top: 12px;
+			margin: 6px 0 0;
 			padding: 9px 12px;
 			border-radius: 6px;
 			border: 1px solid rgba(255, 107, 53, 0.45);
@@ -513,6 +514,7 @@
 			cursor: pointer;
 			transition: all 0.2s;
 		}
+		.hide-video-btn.visible { display: block; }
 		.hide-video-btn:hover {
 			background: rgba(255, 107, 53, 0.18);
 			box-shadow: 0 0 8px rgba(255, 107, 53, 0.35);
@@ -523,15 +525,6 @@
 			color: #fff;
 			border-color: var(--accent2);
 			box-shadow: 0 0 10px rgba(255, 107, 53, 0.45);
-		}
-
-		#path-hint {
-			font-family: 'Share Tech Mono', monospace;
-			font-size: 9px;
-			letter-spacing: 1px;
-			color: rgba(168, 85, 247, 0.5);
-			padding: 4px 0 0;
-			line-height: 1.6;
 		}
 
 		/* ── AUDIO PLAYER ── */
@@ -746,17 +739,10 @@
 				</label>
 			</div>
 
-			<div id="person-chroma-panel" aria-label="Persoana chroma key shader mode">
-				<div class="chroma-panel-title">Shader · video chroma</div>
-				<div class="chroma-mode-buttons" id="chroma-mode-buttons">
-					<button type="button" class="chroma-mode-btn active" data-chroma="decoded"
-							title="Decode video then key — often best under uneven green">Decoded</button>
-					<button type="button" class="chroma-mode-btn" data-chroma="bright"
-							title="Like Native with lifted brightness — tuned for darker clips">Bright</button>
-					<button type="button" class="chroma-mode-btn" data-chroma="native"
-							title="Original custom shader — strongest edge; may fail on some Windows GPUs">Native</button>
-				</div>
-			</div>
+			<button type="button" class="hide-video-btn" id="hide-video-btn"
+					title="Toggle the chroma-key video billboard on / off without unloading it">
+				Hide Video
+			</button>
 
 			<div id="person-video-panel">
 				<div class="person-video-heading">Video clip</div>
@@ -787,10 +773,18 @@
 						   title="Scale only the chroma-key video billboard">
 					<span id="person-video-scale-val">0.7×</span>
 				</div>
-				<button type="button" class="hide-video-btn" id="hide-video-btn"
-						title="Toggle the chroma-key video billboard on / off without unloading it">
-					Hide Video
-				</button>
+			</div>
+
+			<div id="person-chroma-panel" aria-label="Persoana chroma key shader mode">
+				<div class="chroma-panel-title">Shader · video chroma</div>
+				<div class="chroma-mode-buttons" id="chroma-mode-buttons">
+					<button type="button" class="chroma-mode-btn active" data-chroma="decoded"
+							title="Decode video then key — often best under uneven green">Decoded</button>
+					<button type="button" class="chroma-mode-btn" data-chroma="bright"
+							title="Like Native with lifted brightness — tuned for darker clips">Bright</button>
+					<button type="button" class="chroma-mode-btn" data-chroma="native"
+							title="Original custom shader — strongest edge; may fail on some Windows GPUs">Native</button>
+				</div>
 			</div>
 
 			<div class="slider-row" id="model-scale-row">
@@ -815,10 +809,6 @@
 					<label>Speed</label>
 					<input type="range" id="walk-speed" min="1" max="20" value="5" step="1">
 					<span id="walk-speed-val">5</span>
-				</div>
-				<div id="path-hint">
-					▸ Click scene → F12 console<br>
-					&nbsp;&nbsp;to log path coordinates
 				</div>
 
 				<div class="audio-row">
@@ -908,15 +898,16 @@
 
 	// ── BLOB-URL TEXTURE FIX (run once, at module scope) ───────
 	// GLBs with embedded textures are decoded by GLTFLoader → TextureLoader →
-	// ImageLoader → `<img>.src = blob:...`. ImageLoader's default `crossOrigin`
-	// is 'anonymous'; for `blob:` URLs that flips Chrome (with certain
-	// extensions / Vercel-hosted contexts) into a CORS check the blob can't
-	// satisfy, and the load silently errors out as
-	//   `THREE.GLTFLoader: Couldn't load texture blob:...`
-	// resulting in a textureless model. Blobs are same-origin to the document
-	// that minted them and never need CORS, so for `blob:` URLs we drop the
-	// crossOrigin attribute entirely. Patches every ImageLoader the GLTFLoader
-	// internally instantiates per parse.
+	// ImageLoader → `<img>.src = blob:...`. On certain Chrome / Edge / Vercel
+	// combinations the `<img>` load silently fails for `blob:` URLs and we
+	// see `THREE.GLTFLoader: Couldn't load texture blob:...` and a textureless
+	// model. Two layered fixes:
+	//   (a) ImageLoader: drop `crossOrigin` for blob URLs (cheap, fixes the
+	//       common "anonymous makes blob load fail" case).
+	//   (b) TextureLoader: for blob URLs, completely bypass HTMLImageElement
+	//       and use `fetch` + `createImageBitmap` — ImageBitmap is fully
+	//       supported by THREE for GPU upload, and `fetch` is much more
+	//       reliable than `<img>.src` for blob: schemes.
 	(function patchImageLoaderForBlobUrls() {
 		const proto = THREE.ImageLoader && THREE.ImageLoader.prototype;
 		if (!proto || proto.__blobPatched) return;
@@ -926,6 +917,35 @@
 				this.crossOrigin = undefined;
 			}
 			return origLoad.call(this, url, onLoad, onProgress, onError);
+		};
+		proto.__blobPatched = true;
+	})();
+	(function patchTextureLoaderForBlobUrls() {
+		const proto = THREE.TextureLoader && THREE.TextureLoader.prototype;
+		if (!proto || proto.__blobPatched) return;
+		if (typeof createImageBitmap !== 'function') return; // Old browsers — fall back to ImageLoader patch.
+		const origLoad = proto.load;
+		proto.load = function (url, onLoad, onProgress, onError) {
+			if (typeof url !== 'string' || !url.startsWith('blob:')) {
+				return origLoad.call(this, url, onLoad, onProgress, onError);
+			}
+			const tex = new THREE.Texture();
+			fetch(url, { credentials: 'omit' })
+				.then(r => r.blob())
+				.then(b => createImageBitmap(b, {
+					imageOrientation: 'none',
+					premultiplyAlpha: 'none'
+				}))
+				.then(bitmap => {
+					tex.image = bitmap;
+					tex.needsUpdate = true;
+					if (onLoad) onLoad(tex);
+				})
+				.catch(err => {
+					console.error('Blob texture load failed:', url, err);
+					if (onError) onError(err);
+				});
+			return tex;
 		};
 		proto.__blobPatched = true;
 	})();
@@ -1001,6 +1021,27 @@
 			const pcs = window.viewer.scene.pointclouds;
 			if (pcs && pcs.length) pcs.forEach(pc => { pc.visible = true; });
 		} catch (_) {}
+	}
+
+	// ── AUTOPLAY UNLOCK ───────────────────────────────────────
+	// Edge / Safari sometimes refuse to autoplay even a muted <video> on the
+	// very first page-load (especially after a service-worker / hard reload).
+	// We register a single-shot pointer/key listener at the window level: as
+	// soon as the user clicks ANYWHERE (a menu item, the canvas, anywhere),
+	// every queued callback is fired, which is each active video's `play()`.
+	const _autoplayUnlockCallbacks = [];
+	let _autoplayUnlocked = false;
+	function _runAutoplayUnlocks() {
+		_autoplayUnlocked = true;
+		const cbs = _autoplayUnlockCallbacks.splice(0);
+		cbs.forEach(cb => { try { cb(); } catch (_) {} });
+	}
+	['pointerdown', 'click', 'keydown', 'touchstart'].forEach(evt => {
+		window.addEventListener(evt, _runAutoplayUnlocks, { once: true, capture: true });
+	});
+	function registerAutoplayUnlock(cb) {
+		if (_autoplayUnlocked) { try { cb(); } catch (_) {} return; }
+		_autoplayUnlockCallbacks.push(cb);
 	}
 
 	// ── POTREE CLOUD AUTO-ROTATION ────────────────────────────
@@ -1259,6 +1300,10 @@
 	function setPersonVideoPanelVisible(show) {
 		if (!personVideoPanelEl) return;
 		personVideoPanelEl.classList.toggle('visible', !!show);
+		// Hide Video button now lives outside the video panel (sits under
+		// Auto Rotate); keep its visibility tied to the same lifecycle.
+		const hideBtn = document.getElementById('hide-video-btn');
+		if (hideBtn) hideBtn.classList.toggle('visible', !!show);
 		if (show && !personPreviewVideosStarted) {
 			personPreviewVideosStarted = true;
 			setupPersonVideoPreviewThumbs();
@@ -1530,16 +1575,44 @@ uniform float smoothing;`
 		const videoPath = getPersonVideoPath();
 
 		videoEl = document.createElement('video');
-		videoEl.src         = videoPath;
-		videoEl.loop        = true;
+		// IMPORTANT: muted/playsinline/autoplay must be set BEFORE `src`. Edge
+		// (and Safari) latch the autoplay-policy decision the moment the media
+		// element starts loading; setting muted afterwards is too late and the
+		// video never starts on first page-load. Also use `setAttribute` so
+		// the attribute is reflected in the DOM (not just the IDL property),
+		// which is what Edge's autoplay heuristic actually inspects.
 		videoEl.muted       = true;
+		videoEl.defaultMuted = true;
+		videoEl.setAttribute('muted', '');
+		videoEl.setAttribute('playsinline', '');
+		videoEl.setAttribute('autoplay', '');
 		videoEl.playsInline = true;
+		videoEl.autoplay    = true;
+		videoEl.loop        = true;
 		videoEl.crossOrigin = 'anonymous';
+		videoEl.preload     = 'auto';
+		videoEl.src         = videoPath;
+
+		// Belt-and-suspenders play attempts. `canplay` fires once the browser
+		// thinks it can begin playback; `canplaythrough` fires when buffering
+		// is enough for uninterrupted play. Either is a valid autoplay moment.
+		const tryPlay = () => {
+			if (!videoEl) return;
+			const p = videoEl.play();
+			if (p && typeof p.catch === 'function') p.catch(() => {});
+		};
+
+		videoEl.addEventListener('canplaythrough', tryPlay);
+		videoEl.addEventListener('loadeddata',     tryPlay);
+
+		// First user gesture anywhere on the page — picks up any video the
+		// browser refused to autoplay, regardless of which mode loaded it.
+		registerAutoplayUnlock(() => { if (videoEl) tryPlay(); });
 
 		videoEl.addEventListener('canplay', () => {
 			if (myGen !== personLoadGen) return;
 
-			videoEl.play().catch(() => {});
+			tryPlay();
 
 			videoTex = new THREE.VideoTexture(videoEl);
 			videoTex.minFilter  = THREE.LinearFilter;
