@@ -1147,10 +1147,10 @@
 	function reloadActivePerson() {
 		const mdl = document.querySelector('.model-btn.active');
 		if (!mdl || isLoading) return;
-		if (mdl.dataset.type === 'person') {
-			loadPerson(mdl.dataset.name, null);
-		} else if (mdl.dataset.type === 'person-m1') {
-			loadPerson(mdl.dataset.name, mdl.dataset.model);
+		if (mdl.dataset.type === 'monument') {
+			loadMonument(mdl.dataset.name, mdl.dataset.model);
+		} else if (mdl.dataset.type === 'agriculture') {
+			loadAgriculture(mdl.dataset.name);
 		}
 	}
 
@@ -1730,17 +1730,37 @@ uniform float smoothing;`
 			document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
 			btn.classList.add('active');
 
-			if (btn.dataset.type === 'person') {
-				loadPerson(btn.dataset.name, null);
-			} else if (btn.dataset.type === 'person-m1') {
-				loadPerson(btn.dataset.name, btn.dataset.model);
-			} else if (btn.dataset.type === 'potree') {
-				loadPotreeCloud(btn.dataset.name);
-			} else {
-				loadModel(btn.dataset.path, btn.dataset.name);
+			if (btn.dataset.type === 'monument') {
+				loadMonument(btn.dataset.name, btn.dataset.model);
+			} else if (btn.dataset.type === 'agriculture') {
+				loadAgriculture(btn.dataset.name);
 			}
 		});
 	});
+
+	// ── HIDE / SHOW VIDEO TOGGLE ───────────────────────────────
+	// Lives inside the video panel — flips personGroup.visible without tearing
+	// down the video pipeline, so the same clip can be brought back instantly.
+	const hideVideoBtn = document.getElementById('hide-video-btn');
+	let videoHidden = false;
+
+	function resetVideoVisibility() {
+		videoHidden = false;
+		if (hideVideoBtn) {
+			hideVideoBtn.textContent = 'Hide Video';
+			hideVideoBtn.classList.remove('hidden-state');
+		}
+	}
+
+	if (hideVideoBtn) {
+		hideVideoBtn.addEventListener('click', () => {
+			if (!personGroup) return;
+			videoHidden = !videoHidden;
+			personGroup.visible = !videoHidden;
+			hideVideoBtn.textContent = videoHidden ? 'Show Video' : 'Hide Video';
+			hideVideoBtn.classList.toggle('hidden-state', videoHidden);
+		});
+	}
 
 	// ── CONTROLS ───────────────────────────────────────────────
 	rotateToggle.addEventListener('change', () => { autoRotate = rotateToggle.checked; });
@@ -1806,13 +1826,7 @@ uniform float smoothing;`
 			markPersonVideoActiveButton();
 			markChromaModeButtons();
 
-			const mdl = document.querySelector('.model-btn.active');
-			if (!mdl) return;
-			if (mdl.dataset.type === 'person') {
-				loadPerson(mdl.dataset.name, null);
-			} else if (mdl.dataset.type === 'person-m1') {
-				loadPerson(mdl.dataset.name, mdl.dataset.model);
-			}
+			reloadActivePerson();
 		});
 	});
 
