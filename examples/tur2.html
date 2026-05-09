@@ -897,71 +897,68 @@
 	import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 	// ── BLOB-URL TEXTURE FIX ───────────────────────────────────
-	// CONFIRMED ROOT CAUSE (Chrome/Edge/Brave, three.js r160):
+	// ROOT CAUSE (confirmed from GLTFLoader r160 source code):
 	//
-	// GLTFLoader r160 detects createImageBitmap support and uses ImageBitmapLoader
-	// (not ImageLoader) on all Chromium browsers. ImageBitmapLoader does:
-	//     fetch(blobUrl) → response.blob() → createImageBitmap(blob)
-	// Meanwhile GLTFLoader calls URL.revokeObjectURL(blobUrl) in its cleanup.
-	// When the revoke wins the race against fetch(), the fetch fails with a
-	// network error → "THREE.GLTFLoader: Couldn't load texture blob:..."
-	// This is intermittent because it's a pure CPU scheduling race.
+	// For GLBs with embedded textures, loadImageSource() does:
+	//   1. getDependency('bufferView') → new Blob([data]) → URL.createObjectURL(blob)
+	//   2. loader.load(blobUrl, ...)   ← ImageBitmapLoader.load(), schedules fetch(blobUrl)
+	//   3. URL.revokeObjectURL(blobUrl) ← called in the SAME .finally() chain
 	//
-	// THE FIX: intercept URL.revokeObjectURL and the global fetch() to track
-	// all in-flight fetch calls on blob: URLs. If a revoke arrives while a
-	// fetch is still pending, defer it until the fetch settles. This makes
-	// the blob URL stay valid for the full duration of the fetch → bitmap
-	// pipeline, killing the race permanently.
-	(function fixBlobUrlRaceCondition() {
-		if (URL.__blobFetchSafe) return;
+	// Step 3 runs before fetch() even starts (same microtask queue), so the
+	// blob URL is already dead when ImageBitmapLoader tries to fetch it.
+	// This explains both the error AND the intermittency (timing varies by load).
+	//
+	// THE FIX: intercept URL.createObjectURL to keep the raw Blob. When
+	// revokeObjectURL is called, don't actually free it — store the Blob.
+	// When fetch() is called on a "revoked" URL, transparently re-create
+	// the blob URL from the stored Blob, fetch it, then truly release it.
+	(function fixGltfBlobTextures() {
+		if (URL.__gltfBlobFixed) return;
+		URL.__gltfBlobFixed = true;
 
-		// Track pending fetch calls: blobUrl → refcount
-		const _pendingFetches = new Map();
-		const _deferredRevokes = new Set();
+		const _live    = new Map(); // blobUrl → Blob (created, not yet revoked)
+		const _revoked = new Map(); // blobUrl → Blob (revoked early, fetch pending)
 
-		function _settle(url) {
-			const n = (_pendingFetches.get(url) || 1) - 1;
-			if (n <= 0) {
-				_pendingFetches.delete(url);
-				if (_deferredRevokes.has(url)) {
-					_deferredRevokes.delete(url);
-					try { URL._origRevoke(url); } catch(_) {}
-				}
-			} else {
-				_pendingFetches.set(url, n);
-			}
-		}
-
-		// Wrap global fetch to track blob: URL requests
-		const _origFetch = window.fetch.bind(window);
-		window.fetch = function(input, init) {
-			const url = (typeof input === 'string') ? input
-				: (input && typeof input.url === 'string') ? input.url
-				: null;
-			if (url && url.startsWith('blob:')) {
-				_pendingFetches.set(url, (_pendingFetches.get(url) || 0) + 1);
-				return _origFetch(input, init).then(
-					res => { _settle(url); return res; },
-					err => { _settle(url); return Promise.reject(err); }
-				);
-			}
-			return _origFetch(input, init);
+		// Remember every Blob registered via createObjectURL
+		const _origCreate = URL.createObjectURL.bind(URL);
+		URL.createObjectURL = function(obj) {
+			const url = _origCreate(obj);
+			if (obj instanceof Blob && url) _live.set(url, obj);
+			return url;
 		};
 
-		// Defer revokeObjectURL while a fetch is still in flight
+		// Soft-revoke: save the Blob instead of releasing it immediately
 		URL._origRevoke = URL.revokeObjectURL.bind(URL);
 		URL.revokeObjectURL = function(url) {
-			if (typeof url !== 'string' || !url.startsWith('blob:')) {
-				return URL._origRevoke(url);
+			if (typeof url === 'string' && _live.has(url)) {
+				_revoked.set(url, _live.get(url));
+				_live.delete(url);
+				// Don't call _origRevoke — keep the URL alive until fetch() uses it
+				return;
 			}
-			if (_pendingFetches.has(url)) {
-				_deferredRevokes.add(url); // revoke once fetch settles
-			} else {
-				URL._origRevoke(url);
-			}
+			URL._origRevoke(url);
 		};
 
-		URL.__blobFetchSafe = true;
+		// Intercept fetch: if the URL was already soft-revoked, re-create it
+		const _origFetch = window.fetch.bind(window);
+		window.fetch = function(input, init) {
+			const url = typeof input === 'string' ? input
+				: (input instanceof Request) ? input.url : null;
+
+			if (url && _revoked.has(url)) {
+				// Re-create a fresh blob URL from the saved Blob
+				const blob   = _revoked.get(url);
+				_revoked.delete(url);
+				const fresh  = _origCreate(blob);
+				return _origFetch(fresh, init).then(
+					res => { URL._origRevoke(fresh); return res; },
+					err => { URL._origRevoke(fresh); return Promise.reject(err); }
+				);
+			}
+			// For URLs still in _live, remove from tracking once fetch starts
+			if (url && _live.has(url)) _live.delete(url);
+			return _origFetch(input, init);
+		};
 	})();
 
 	/** Resolve ./models/... against this HTML URL */
