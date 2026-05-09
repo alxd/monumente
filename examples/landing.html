@@ -266,19 +266,25 @@
       border: 1px solid var(--border);
       text-decoration: none;
       color: inherit;
-      transition: transform 0.18s ease, border-color 0.18s, box-shadow 0.18s;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+      outline: none;
     }
     .link-card:hover {
-      transform: translateY(-3px);
-      border-color: rgba(0, 200, 255, 0.35);
-      box-shadow: 0 22px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 200, 255, 0.15);
+      border-color: rgba(0, 200, 255, 0.4);
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.52), 0 0 0 1px rgba(0, 200, 255, 0.18);
+    }
+    .link-card:focus-visible {
+      box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
     }
     .link-card-media {
       position: relative;
       aspect-ratio: 16 / 10;
       overflow: hidden;
       background: #080b10;
+      line-height: 0;
+      flex-shrink: 0;
+      border-radius: var(--radius) var(--radius) 0 0;
     }
     .link-card-media img {
       width: 100%;
@@ -286,6 +292,8 @@
       object-fit: cover;
       display: block;
       transition: transform 0.35s ease;
+      backface-visibility: hidden;
+      transform: translateZ(0);
     }
     .link-card:hover .link-card-media img {
       transform: scale(1.04);
@@ -375,7 +383,7 @@
           <input id="email" name="email" type="email" autocomplete="email" required maxlength="320" placeholder="nume@domeniu.ro" />
 
           <div class="terms-box" tabindex="0" aria-label="Termeni și condiții">
-            <h2>Termeni, confidențialitate și obligații (în sens NDA)</h2>
+            <h2>Termeni, confidențialitate și obligații (NDA)</h2>
             <p>
               Prin accesarea acestei platforme și bifarea acordului de mai jos, confirmați că ați citit și acceptați integral prevederile următoare, care au caracter obligatoriu și sunt concepute pentru a proteja informațiile, conținutul tehnic și modul de prezentare puse la dispoziție prin intermediul site-ului.
             </p>
@@ -408,7 +416,7 @@
           <div class="check-row">
             <input type="checkbox" id="terms" name="terms" required />
             <label for="terms">
-              Am citit și accept integral termenii, obligațiile de confidențialitate și condițiile de mai sus (inclusiv în sens de angajament de tip NDA).
+              Am citit și accept integral termenii și condițiile de mai sus (angajament de tip NDA).
             </label>
           </div>
 
@@ -437,7 +445,7 @@
             <span class="link-card-cta">Deschide harta →</span>
           </div>
         </a>
-        <a class="link-card" href="/examples/viewer.html">
+        <a class="link-card" href="/examples/tur.html">
           <div class="link-card-media">
             <img src="/examples/img/hunedoara.jpg" alt="Patrimoniu arhitectural reprezentativ, ilustrare pentru vizualizare 3D" width="640" height="400" loading="lazy" decoding="async" />
             <div class="link-card-media-overlay" aria-hidden="true"></div>
