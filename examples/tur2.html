@@ -125,9 +125,36 @@
 			padding: 0 12px;
 		}
 
-		#model-list::-webkit-scrollbar { width: 3px; }
-		#model-list::-webkit-scrollbar-track { background: transparent; }
-		#model-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+		/* ── Visible scrollbars (sidebar + model list) ── */
+		#sidebar { scrollbar-width: thin; scrollbar-color: var(--accent) #11161d; }
+		#sidebar::-webkit-scrollbar { width: 10px; }
+		#sidebar::-webkit-scrollbar-track {
+			background: #11161d;
+			border-left: 1px solid var(--border);
+		}
+		#sidebar::-webkit-scrollbar-thumb {
+			background: linear-gradient(180deg, var(--accent), var(--accent2));
+			border-radius: 6px;
+			border: 2px solid #11161d;
+			box-shadow: 0 0 6px rgba(0, 200, 255, 0.4);
+		}
+		#sidebar::-webkit-scrollbar-thumb:hover {
+			background: linear-gradient(180deg, var(--accent), var(--accent3));
+		}
+
+		#model-list { scrollbar-width: thin; scrollbar-color: var(--accent) #11161d; }
+		#model-list::-webkit-scrollbar { width: 8px; }
+		#model-list::-webkit-scrollbar-track {
+			background: #11161d;
+			border-radius: 4px;
+		}
+		#model-list::-webkit-scrollbar-thumb {
+			background: var(--accent);
+			border-radius: 4px;
+			border: 2px solid #11161d;
+			box-shadow: 0 0 4px rgba(0, 200, 255, 0.5);
+		}
+		#model-list::-webkit-scrollbar-thumb:hover { background: var(--accent3); }
 
 		.model-btn {
 			display: flex;
@@ -162,6 +189,7 @@
 		}
 
 		.model-btn.person-btn::before { background: var(--accent3); }
+		.model-btn.cloud-btn::before  { background: var(--accent2); }
 
 		.model-btn:hover {
 			background: var(--active-bg);
@@ -180,6 +208,14 @@
 			color: var(--accent3);
 			background: rgba(168, 85, 247, 0.07);
 		}
+
+		.model-btn.cloud-btn.active {
+			border-color: rgba(255, 107, 53, 0.35);
+			color: var(--accent2);
+			background: rgba(255, 107, 53, 0.07);
+		}
+		.model-btn.cloud-btn.active .icon { background: rgba(255, 107, 53, 0.15); }
+		.model-btn.cloud-btn.active .sub  { color: rgba(255, 107, 53, 0.55); }
 
 		.model-btn.active::before { transform: scaleY(1); }
 
@@ -654,6 +690,10 @@
 		<div class="section-title">Models</div>
 
 		<div id="model-list">
+			<button class="model-btn cloud-btn" data-name="Point Cloud" data-type="potree">
+				<div class="icon">☁</div>
+				<div class="name">Point Cloud<span class="sub">sigeom.sa · potree</span></div>
+			</button>
 			<button class="model-btn" data-path="./models/statuie_florilor.glb" data-name="Statuie Florilor" data-type="model">
 				<div class="icon">◈</div>
 				<div class="name">Statuie Florilor<span class="sub">.glb</span></div>
@@ -840,7 +880,8 @@
 
 	<script type="module">
 	import * as THREE from 'three';
-	import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+	import { GLTFLoader }     from 'three/addons/loaders/GLTFLoader.js';
+	import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 	/** Resolve ./models/... against this HTML URL */
 	function resolveHref(relPath) {
@@ -919,18 +960,27 @@
 	// instead of returning stale handles to textures we already disposed.
 	THREE.Cache.enabled = false;
 
-	// Lighting (only affects overlay GLB models, not the point cloud).
-	// PBR MeshStandardMaterial needs decent ambient fill or it renders nearly black
-	// (no envMap is provided here), so we use a strong ambient + hemisphere combo.
-	overlayRoot.add(new THREE.AmbientLight(0xffffff, 1.4));
-	overlayRoot.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
-	const key = new THREE.DirectionalLight(0xffffff, 2.5);
+	// IBL environment for GLB MeshStandardMaterial (PBR).
+	// Without this, GLB materials with even moderate metalness render nearly flat —
+	// the diffuse map appears washed out / "untextured" because the specular term
+	// has nothing to reflect. RoomEnvironment is a tiny synthetic indoor scene that
+	// PMREM bakes into a prefiltered cubemap; assigning it as scene.environment
+	// gives every PBR material proper indirect lighting for free.
+	const pmremGenerator = new THREE.PMREMGenerator(overlayRenderer);
+	pmremGenerator.compileEquirectangularShader();
+	overlayScene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+	pmremGenerator.dispose();
+
+	// Lighting (analytical lights add direction/contrast on top of the IBL fill)
+	overlayRoot.add(new THREE.AmbientLight(0xffffff, 0.4));
+	overlayRoot.add(new THREE.HemisphereLight(0xffffff, 0x444466, 0.5));
+	const key = new THREE.DirectionalLight(0xffffff, 2.0);
 	key.position.set(5, 8, 5);
 	overlayRoot.add(key);
-	const fill = new THREE.DirectionalLight(0xb0c8ff, 1.0);
+	const fill = new THREE.DirectionalLight(0xb0c8ff, 0.8);
 	fill.position.set(-5, 2, -3);
 	overlayRoot.add(fill);
-	const rim = new THREE.DirectionalLight(0xffe0b0, 0.6);
+	const rim = new THREE.DirectionalLight(0xffe0b0, 0.5);
 	rim.position.set(0, -3, -5);
 	overlayRoot.add(rim);
 
@@ -1522,9 +1572,11 @@ uniform float smoothing;`
 
 	// ── CLEAR SCENE / RESOURCE DISPOSAL ────────────────────────
 	// Every PBR / shader / video texture slot we want to release on model swap.
+	// NOTE: 'envMap' is intentionally excluded — scene.environment (the PMREM IBL)
+	// is shared across every model, and disposing it once would break every subsequent load.
 	const TEXTURE_SLOT_KEYS = [
 		'map', 'alphaMap', 'aoMap', 'bumpMap', 'displacementMap',
-		'emissiveMap', 'envMap', 'lightMap', 'metalnessMap',
+		'emissiveMap', 'lightMap', 'metalnessMap',
 		'normalMap', 'roughnessMap', 'specularMap',
 		'clearcoatMap', 'clearcoatNormalMap', 'clearcoatRoughnessMap',
 		'transmissionMap', 'thicknessMap',
@@ -1599,6 +1651,32 @@ uniform float smoothing;`
 		stopAudio();
 	}
 
+	// ── LOAD POTREE POINT CLOUD ────────────────────────────────
+	// "Show the Potree cloud" menu entry — clears the overlay scene,
+	// re-shows the hidden point cloud(s), and re-frames the camera on them.
+	function loadPotreeCloud(displayName) {
+		if (isLoading) return;
+		isLoading = true;
+		clearScene();
+		walkControlsEl.classList.remove('visible');
+		setPersonVideoPanelVisible(false);
+		setPersonChromaPanelVisible(false);
+		loaderOverlay.classList.add('visible');
+		setStatus('loading', 'POINT CLOUD...');
+
+		showPotreePointclouds();
+		try { window.viewer.fitToScreen(); } catch (_) {}
+
+		// Refresh anchor/scene-size hint against the now-visible cloud
+		syncSceneAnchor();
+		zoomAnchorPivot = null;
+
+		loaderOverlay.classList.remove('visible');
+		setStatus('ready', (displayName || 'POINT CLOUD').toUpperCase());
+		nameOverlay.textContent = displayName || 'Point Cloud';
+		isLoading = false;
+	}
+
 	// ── SIDEBAR BUTTONS ────────────────────────────────────────
 	document.querySelectorAll('.model-btn').forEach(btn => {
 		btn.addEventListener('click', () => {
@@ -1610,6 +1688,8 @@ uniform float smoothing;`
 				loadPerson(btn.dataset.name, null);
 			} else if (btn.dataset.type === 'person-m1') {
 				loadPerson(btn.dataset.name, btn.dataset.model);
+			} else if (btn.dataset.type === 'potree') {
+				loadPotreeCloud(btn.dataset.name);
 			} else {
 				loadModel(btn.dataset.path, btn.dataset.name);
 			}
